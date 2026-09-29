@@ -1,0 +1,6 @@
+{
+  "name": "wadeea-dynamic-variables",
+  "private": true,
+  "type": "commonjs",
+  "main": "index.ts"
+}

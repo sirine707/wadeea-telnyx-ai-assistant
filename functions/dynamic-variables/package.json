@@ -1,0 +1,13 @@
+{
+  "name": "wadeea-dynamic-variables",
+  "private": true,
+  "type": "commonjs",
+  "main": "index.ts",
+  "dependencies": {
+    "telnyx": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

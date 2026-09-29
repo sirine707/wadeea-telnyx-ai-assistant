@@ -1,0 +1,7 @@
+[edge_compute]
+func_id = "4374037b-49bf-400c-8862-c60711869e2d"
+func_name = "wadeea-dynamic-variables"
+
+# For environment variables and secrets:
+# Use telnyx-edge secrets add <name> <value>
+# Secrets are injected as environment variables into all your functions

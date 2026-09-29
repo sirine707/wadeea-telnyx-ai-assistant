@@ -1,0 +1,9 @@
+name = "wadeea-mcp"
+main = "index.ts"
+compatibility_date = "2026-05-01"
+
+[[actors]]
+binding = "FLEET"
+type = "FleetInventory"
+
+# DATABASE_URL is set via: telnyx-edge secrets add DATABASE_URL "postgresql://..."

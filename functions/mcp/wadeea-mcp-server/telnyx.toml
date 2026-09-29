@@ -1,0 +1,11 @@
+name = "wadeea-mcp-server"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+
+[[actors]]
+binding = "FLEET"
+type = "FleetInventory"
+
+[edge_compute]
+func_id = "d1218609-c115-400f-9893-470dd7483365"
+func_name = "wadeea-mcp-server"
