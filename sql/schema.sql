@@ -47,3 +47,21 @@ CREATE TABLE IF NOT EXISTS bookings (
 
 CREATE INDEX IF NOT EXISTS idx_bookings_customer ON bookings(customer_phone);
 CREATE INDEX IF NOT EXISTS idx_bookings_status   ON bookings(status);
+
+-- Fallback reservation store (ADR-0002): source of truth for reservations ONLY
+-- while the FleetInventory actor is disabled ([[actors]] block absent). Writes
+-- go through one transaction: pg_advisory_xact_lock(hashtext(category_id)) +
+-- conditional INSERT, reproducing the actor's per-category serialization.
+-- Distinct from `bookings` (records) — never both authoritative at once.
+CREATE TABLE IF NOT EXISTS sql_reservations (
+  booking_id  TEXT PRIMARY KEY,
+  category_id TEXT NOT NULL,
+  start_date  DATE NOT NULL,
+  end_date    DATE NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'confirmed',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY (category_id) REFERENCES vehicle_categories(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sql_res_category_dates
+  ON sql_reservations(category_id, start_date, end_date);

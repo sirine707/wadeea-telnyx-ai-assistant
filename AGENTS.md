@@ -44,24 +44,28 @@ workflow starts at its start node → prompt nodes collect slots and call MCP to
 tools read KV / call the FleetInventory actor → result returned to assistant → assistant
 speaks to caller → edges route to the next node.
 
-## Repository layout (planned — not yet implemented)
+## Repository layout
 
 ```
-/functions/dynamic-variables/   dynamic-variables webhook (classic Edge function: func.toml + index.ts)
-/functions/mcp/                 custom MCP server (classic Edge function: func.toml + index.ts)
-/actors/                        FleetInventory Actor (telnyx.toml umbrella project, TS only)
-/lib/                           shared types, Telnyx client helpers, logging
-/test/                          Vitest suites
-/docs/adr/                      architecture decision records
-opencode.jsonc                  OpenCode config with @telnyx/opencode plugin active
+/functions/wadeea-dynamic-variables-v3/  webhook box (LIVE): Ed25519 via node:crypto, KV flag, CallSession actor
+/functions/mcp/wadeea-mcp/               MCP box (LIVE): 6 tools, FleetInventory actor, SQLDB binding, hand-rolled MCP
+/functions/mcp/wadeea-mcp-server-v3/     deployed Postgres/Neon fallback engine (failover only)
+/lib/                                    shared tested modules (protocol, clients, pure actor logic, fakes)
+/test/                                   Vitest suites (root) — function-local suites live beside their function
+/sql/                                    schema+seed: sqldb_schema_seed.sql (SQLite/SQLDB) and schema.sql+seed.sql (Neon fallback)
+/docs/adr/                               architecture decision records (0001–0003)
+opencode.jsonc                           OpenCode config with @telnyx/opencode plugin active
 ```
+
+Both live functions are single-dependency (`@telnyx/edge-runtime`) umbrella
+projects; module scope must stay inert (bare-Node load test before any ship).
 
 Each Edge Function has its own `func.toml` (classic manifest with `[edge_compute]` identity, written by `telnyx-edge new-func`). The FleetInventory Actor uses a `telnyx.toml` umbrella project (TypeScript only, esbuild-bundled, `[[actors]]` block). There is no root-level `func.toml`. — https://developers.telnyx.com/docs/edge-compute/configuration
 
 ## Conventions
 
-- Language: TypeScript, `strict`. Runtime: Telnyx Edge Compute (`@telnyx/edge-runtime`). Shared SQL via Neon Postgres (`@neondatabase/serverless`, `DATABASE_URL`). No externally-managed servers beyond Edge functions.
-- MCP: `@modelcontextprotocol/sdk`, streamable-http transport, deployed as an Edge function. Tool names are snake_case; one tool = one business action.
+- Language: TypeScript, `strict`. Runtime: Telnyx Edge Compute (`@telnyx/edge-runtime`). Shared SQL via the Telnyx SQLDB binding (`[storage.sqldb]`, zero client deps); the deployed fallback engine still uses Neon (`DATABASE_URL`). No externally-managed servers beyond Edge functions.
+- MCP: hand-rolled streamable-http subset (`lib/mcp_protocol.ts`, ADR 0003) — no SDK, to keep bundles single-dependency for actor hosts. Tool names are snake_case; one tool = one business action.
 - Workflow nodes: name them descriptively (names appear in transcripts). Prefer `append` mode to keep base safety/brand rules; use `replace` only for tightly-scoped steps. Scope tools per node — leave enabled only what that step needs.
 - Speak nodes for anything that must be delivered verbatim (greetings, the Dubai rental disclosure, compliance statements). Never use a prompt node where exact wording is required.
 - Use **variable-comparison** edges for deterministic routing (account state, auth flags, `telnyx_last_tool_status_code`, elapsed time) and **LLM** edges for intent/sentiment/completeness. Declare edges in priority order.
@@ -104,8 +108,9 @@ Each Edge Function has its own `func.toml` (classic manifest with `[edge_compute
 
 ## Current status
 
-- Done: engineering harness / documentation (AGENTS.md, ADR 0001, README); Telnyx AI Assistant + New Booking workflow branch configured and voice-tested (Identify Intent → New Booking → Review Booking Request → Request Ready for Availability Check); dynamic-variables Edge Function implemented (handler + Ed25519 verification + 7 demo variables + structured logging + tests); data layer implemented (FleetInventory Actor with atomic reserve/release, 6 MCP tools, SQL schema + seed, reservation store with overlap/idempotency, 48 tests passing).
-- Not started: MCP server deploy, SQL DB provisioning, KV flag wiring, dynamic-variables deploy; other workflow branches (extensions, deposits/charges, documents, human handoff).
+- **LIVE (2026-09-29):** canonical two-box architecture (ADR 0003) — `wadeea-mcp` (6 tools, FleetInventory actor, SQLDB) and `wadeea-dynamic-variables-v3` (Ed25519, KV flag, CallSession actor), both verified on real phone calls; 5 production reservations migrated into the actor and count-verified; `wadeea-mcp-server-v3` retained as deployed failover.
+- Remaining: portal polish (farewell speak node → end_call, Existing Rental branch), README demo package, git commit.
+
 
 ## MCP tools
 
@@ -122,10 +127,13 @@ Each Edge Function has its own `func.toml` (classic manifest with `[edge_compute
 
 | Data | Source of truth | Store | Notes |
 |---|---|---|---|
-| Vehicle categories, pricing, rules, documents | Neon Postgres (`DATABASE_URL`) | shared, read-mostly | Operator-seeded via `psql` |
-| **Reservations (date ranges)** | **FleetInventory Actor** (`ctx.storage.sql`) | per-category, authoritative | Atomic check-and-reserve; never in SQL/KV |
-| Availability (computed) | FleetInventory Actor | derived (not stored) | Overlap count vs `total_units` |
-| Booking/rental records | Neon Postgres (`DATABASE_URL`) | shared lookup | For Existing Rental branch; never used for availability |
-| Feature flags | KV (`flag:bookings_enabled`) | toggle | Only `flag:bookings_enabled` for MVP |
+| Vehicle categories, pricing, rules, documents | Telnyx SQLDB `wadeea-db-2` | shared, read-mostly (5-min in-function cache) | seeded via `telnyx-edge storage sqldb execute --file sql/sqldb_schema_seed.sql` |
+| **Reservations (date ranges)** | **FleetInventory actor** (`ctx.storage`, per category) | authoritative | atomic check-and-reserve; blueprint get/put shape |
+| Booking/rental records | Telnyx SQLDB `wadeea-db-2` | shared lookup | never used for availability |
+| Caller sessions (`call_count`, `last_intent`) | CallSession actor (per caller) | webhook-owned | feeds dynamic variables |
+| Feature flag `flag/bookings_enabled` | KV `wadeea-config` | toggle | read by the webhook per call |
+| Fallback engine data | Neon Postgres (`DATABASE_URL`) | dormant | only if the assistant is repointed to `wadeea-mcp-server-v3` |
 
-**Never calculate availability from SQL bookings.** Availability is always computed by asking the FleetInventory Actor.
+**Never calculate availability from booking records.** Availability comes from the FleetInventory actor (or, in failover, the fallback engine's `sql_reservations`).
+
+**Ops invariant (ADR 0003):** the account snapshot bucket holds ~5 objects and is never GC'd by the platform — run the janitor (prune superseded `gen-*` objects) during any write activity, or SQLDB writes and actor activations fail with `TooManyObjects`.

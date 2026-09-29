@@ -1,0 +1,18 @@
+name = "wadeea-mcp"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+
+# The canonical MCP box (mentor's diagram): one self-contained function.
+# Single dependency (@telnyx/edge-runtime); data via the SQLDB binding; the
+# FleetInventory actor lives in-function; MCP protocol hand-rolled (ADR 0003).
+
+[[actors]]
+binding = "FLEET"
+type = "FleetInventory"
+
+[storage.sqldb.DB]
+id = "d6b65834-df8b-48e1-9c8d-6793299a30f4"
+
+[edge_compute]
+func_id = "c722fc30-3d55-47cc-9427-3cfb2bd8f652"
+func_name = "wadeea-mcp"

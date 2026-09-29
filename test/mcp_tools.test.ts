@@ -50,7 +50,7 @@ describe("MCP tools", () => {
         { category_id: "truck", start_date: "2026-09-26", duration_days: 1 },
         deps,
       );
-      expect(result).toEqual({ error: "category not found" });
+      expect((result as { error: string }).error).toContain("category not found");
     });
   });
 
@@ -72,7 +72,7 @@ describe("MCP tools", () => {
         { category_id: "truck", duration_days: 1 },
         deps,
       );
-      expect(result).toEqual({ error: "pricing not found for category" });
+      expect((result as { error: string }).error).toContain("valid categories");
     });
   });
 
@@ -256,6 +256,49 @@ describe("MCP tools", () => {
     it("returns error when no args", async () => {
       const result = await tools.lookupBooking({}, deps);
       expect(result).toEqual({ error: "must provide booking_id or customer_phone" });
+    });
+  });
+
+  describe("category id normalization (voice models send 'SUV', db stores 'suv')", () => {
+    it("check_availability accepts uppercase category id", async () => {
+      const result = await tools.checkAvailability(
+        { category_id: "SUV", start_date: "2026-10-10", duration_days: 3 },
+        deps,
+      );
+      expect("error" in result).toBe(false);
+      expect((result as { category_id: string }).category_id).toBe("suv");
+    });
+
+    it("get_quote accepts mixed-case category id with whitespace", async () => {
+      const result = await tools.getQuote({ category_id: " Suv ", duration_days: 3 }, deps);
+      expect("error" in result).toBe(false);
+      expect((result as { total_cents: number }).total_cents).toBe(75000);
+    });
+
+    it("create_booking accepts uppercase category id", async () => {
+      const result = await tools.createBooking(
+        {
+          category_id: "LUXURY",
+          start_date: "2026-10-10",
+          duration_days: 2,
+          customer_name: "Case Test",
+          customer_phone: null,
+          delivery_area: null,
+        },
+        deps,
+      );
+      expect(result.ok).toBe(true);
+    });
+
+    it("unknown category error lists the valid category ids", async () => {
+      const result = await tools.checkAvailability(
+        { category_id: "spaceship", start_date: "2026-10-10", duration_days: 3 },
+        deps,
+      );
+      expect("error" in result).toBe(true);
+      const err = (result as { error: string }).error;
+      expect(err).toContain("suv");
+      expect(err).toContain("sedan");
     });
   });
 });

@@ -87,6 +87,10 @@ export class FakeSqlClient implements SqlClient {
     return this.categories.get(categoryId) ?? null;
   }
 
+  async listCategoryIds(): Promise<string[]> {
+    return [...this.categories.keys()];
+  }
+
   async getPricing(categoryId: string): Promise<Pricing | null> {
     return this.pricing.get(categoryId) ?? null;
   }
@@ -163,4 +167,68 @@ export function seedFakeSql(sql: FakeSqlClient): void {
     { id: "emirates_id", name: "Emirates ID", required_for: "residents", description: "Emirates ID card" },
     { id: "credit_card", name: "Credit Card", required_for: "all", description: "Credit card for security deposit" },
   ];
+}
+
+// ── Fake for the Postgres reservation fallback (ADR-0002) ──
+
+import type { AtomicReservationDb, AtomicReserveOutcome } from "./sql_reservation_client";
+
+interface FakeSqlReservation {
+  booking_id: string;
+  category_id: string;
+  start_date: string;
+  end_date: string;
+  status: string;
+}
+
+export class InMemoryAtomicReservationDb implements AtomicReservationDb {
+  private rows = new Map<string, FakeSqlReservation>();
+
+  // Atomic by construction: no awaits between check and insert, so each call
+  // runs to completion before the next — mirroring the real impl's transaction.
+  async reserveAtomic(
+    categoryId: string,
+    bookingId: string,
+    startDate: string,
+    endDate: string,
+    totalUnits: number,
+  ): Promise<AtomicReserveOutcome> {
+    if (this.rows.has(bookingId)) return { inserted: false, existing: true };
+    const overlapping = this.count(categoryId, startDate, endDate);
+    if (overlapping >= totalUnits) return { inserted: false, existing: false };
+    this.rows.set(bookingId, {
+      booking_id: bookingId,
+      category_id: categoryId,
+      start_date: startDate,
+      end_date: endDate,
+      status: "confirmed",
+    });
+    return { inserted: true, existing: false };
+  }
+
+  async release(categoryId: string, bookingId: string): Promise<{ found: boolean }> {
+    const row = this.rows.get(bookingId);
+    if (!row || row.category_id !== categoryId) return { found: false };
+    this.rows.delete(bookingId);
+    return { found: true };
+  }
+
+  async countOverlapping(categoryId: string, startDate: string, endDate: string): Promise<number> {
+    return this.count(categoryId, startDate, endDate);
+  }
+
+  private count(categoryId: string, startDate: string, endDate: string): number {
+    let n = 0;
+    for (const r of this.rows.values()) {
+      if (
+        r.category_id === categoryId &&
+        r.status === "confirmed" &&
+        r.start_date < endDate &&
+        startDate < r.end_date
+      ) {
+        n++;
+      }
+    }
+    return n;
+  }
 }

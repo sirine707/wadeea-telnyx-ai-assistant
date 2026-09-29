@@ -1,9 +1,0 @@
-[edge_compute]
-func_id = "4374037b-49bf-400c-8862-c60711869e2d"
-func_name = "wadeea-dynamic-variables"
-
-# Secrets (TELNYX_API_KEY, TELNYX_PUBLIC_KEY) are managed via CLI:
-#   telnyx-edge secrets add TELNYX_API_KEY "..."
-#   telnyx-edge secrets add TELNYX_PUBLIC_KEY "..."
-# They are injected as environment variables into all functions automatically.
-# No [env_vars] or binding blocks needed for this function.

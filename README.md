@@ -106,10 +106,46 @@ Beyond logs: a counter (MCP tool error rate) and a latency trace of the request 
 Edge Function → KV/Actor → MCP, both keyed by `telnyx_conversation_id`. On demo day we
 walk through one real bug found via these signals — evidence, not vibes.
 
-## Status
+**The story we actually lived (demo-day material):** bookings started failing
+mid-test with `booking_failed`; invocation logs showed the tool erring inside a
+healthy function; the SQLDB CLI reproduced it as `ShipError … TooManyObjects`;
+listing the account's actor-runtime bucket over S3 showed it capped at 5 objects,
+full of never-pruned snapshot generations — the same mechanism that had silently
+killed actor activations for three days. Fix: an external janitor pruning
+superseded generations. Full forensic trail: ADR 0002/0003.
 
-- **Done:** engineering harness / docs (AGENTS.md, ADR 0001, this README); Telnyx AI Assistant + New Booking workflow branch configured and voice-tested (Identify Intent → New Booking → Review Booking Request → Request Ready for Availability Check).
-- **Not started:** MCP server, dynamic-variables webhook, FleetInventory actor, Edge function code, deploy; other branches (extensions, deposits/charges, documents, human handoff).
+**We lived this story on 2026-09-27:** every deploy of an actor-bearing function
+failed with no logs. Isolation probes (stock CLI templates) narrowed it to one broken
+hop — actor invocations returning `502: bad gateway` from the platform's actor runtime,
+while plain functions served fine. Full timeline, evidence, and the resulting Postgres
+fallback: [ADR 0002](docs/adr/0002-actor-outage-postgres-fallback.md).
+
+## Status — LIVE (2026-09-29)
+
+| Component | URL / ID | State |
+|---|---|---|
+| MCP server (canonical) | https://wadeea-mcp-c722fc30-3.telnyxcompute.com/mcp | live — assistant attached; 6 tools; FleetInventory actor bookings |
+| Dynamic-variables webhook | https://wadeea-dynamic-variables-v3-923bbb9e-9.telnyxcompute.com | live — Ed25519 verified; CallSession actor; KV flag |
+| Fallback MCP engine | https://wadeea-mcp-server-v3-99a58ff6-c.telnyxcompute.com/mcp | deployed, dormant (failover: repoint the assistant's MCP URL) |
+| SQLDB | `wadeea-db-2` (d6b65834-…) | seeded; booking records live |
+| Actors | `FleetInventory` (per category), `CallSession` (per caller) | both live, verified on real calls |
+
+All six MCP tools, the actor state machine (persist / idempotent replay / capacity
+refusal), signature verification, and dynamic-variable personalization are verified
+on production. Architecture: ADR 0003 (canonical), ADR 0002 (the outage + fallback
+era), ADR 0001 (original design).
+
+### Ops runbook (the two things that matter)
+
+1. **The snapshot-bucket janitor.** The account's actor-runtime bucket holds ~5
+   objects and the platform never prunes it; every SQLDB write and actor
+   activation ships an object. During demos or write activity, prune superseded
+   `gen-*` objects (keep fence + newest) every ~2 minutes — otherwise writes fail
+   with `TooManyObjects`. One SQL file = one object, so bulk-load via `--file`.
+2. **Never redeploy the live actor functions casually.** Actor hosts launch once,
+   at provisioning, with no retry (ADR 0003). Batch changes, verify locally
+   (typecheck, tests, bare-Node bundle load), ship rarely.
+
 
 ## Working in this repo
 

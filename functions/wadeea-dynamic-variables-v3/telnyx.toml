@@ -1,0 +1,18 @@
+name = "wadeea-dynamic-variables-v3"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+
+# The mentor-blueprint webhook box: KV + Actor inside the Edge Function.
+# Bundle stays single-dependency (edge-runtime) — the only profile proven to
+# activate actor hosts on this platform (ADR 0002).
+
+[[actors]]
+binding = "SESSIONS"
+type = "CallSession"
+
+[storage.kv.WADEEA_CONFIG]
+id = "d6bfa576-5a6e-4d5d-a92a-e259f43a7c71"
+
+[edge_compute]
+func_id = "923bbb9e-9ed1-4018-83d8-cab9da76381b"
+func_name = "wadeea-dynamic-variables-v3"

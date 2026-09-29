@@ -1,0 +1,10 @@
+{
+  // OpenCode configuration for the Wadeea project (assignment requirement 6).
+  // Built using Telnyx Inference via the @telnyx/opencode plugin — Telnyx-hosted
+  // models (moonshotai/Kimi-K2.6 et al.) as the AI coding assistant.
+  // Auth: `opencode auth login --provider telnyx --method "API Key"`.
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    "@telnyx/opencode"
+  ]
+}

@@ -1,0 +1,15 @@
+name = "wadeea-mcp-server-v3"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+
+# No [[actors]] block: fallback mode per ADR 0002. Without the FLEET binding,
+# src/index.ts selects the Postgres reservation backend (SqlReservationClient).
+# To re-enable the actor after Telnyx fixes actor invocation: restore
+#   [[actors]]
+#   binding = "FLEET"
+#   type = "FleetInventoryV3"   # fresh type name; rename the class to match
+# and migrate active sql_reservations rows into the actor (see ADR 0002).
+
+[edge_compute]
+func_id = "99a58ff6-c859-4ab6-8483-56dadff8de96"
+func_name = "wadeea-mcp-server-v3"
