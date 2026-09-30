@@ -1,0 +1,7 @@
+[edge_compute]
+func_id = "23449883-5e66-4322-b982-cae71dec90eb"
+func_name = "wadeea-observe"
+
+# For environment variables and secrets:
+# Use telnyx-edge secrets add <name> <value>
+# Secrets are injected as environment variables into all your functions

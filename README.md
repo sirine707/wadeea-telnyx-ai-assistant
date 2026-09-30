@@ -48,30 +48,30 @@ atomic operations behind it.
 
 See [docs/adr/0001-architecture.md](docs/adr/0001-architecture.md) for decisions and open Telnyx questions.
 
-## Current workflow (tested branch)
+## Workflow (all branches voice-tested)
 
 ```
-Greeting (speak)
+Greeting (speak: verbatim greeting + Dubai rental disclosure)
   → Identify Intent (prompt)
        ├── New Booking (prompt)
-       │     → Review Booking Request (prompt)
-       │           → Request Ready for Availability Check (prompt)
-       │                 → [check_availability tool] → availability/quote → confirm → create_booking
-       ├── Existing Rental (prompt)   [not started]
-       └── Escalate (prompt / handoff) [not started]
+       │     → Review Booking Request → Availability Check
+       │         → check_availability → get_quote → confirm → create_booking
+       ├── Existing Rental (prompt) → lookup_booking
+       ├── Documents (prompt) → get_document_requirements / get_rental_rules
+       └── Deposit-back / out-of-scope → Human Handoff (speak) → Transfer, or
+           take-a-message → thank + hang up
 ```
 
-The tested branch collects vehicle category, start date, duration, and delivery area,
-reviews the request back with the caller, and reaches the point where it can call
-`check_availability`.
+Deterministic routing (edge order matters): deposit-back → handoff is declared
+above the existing-rental edge; wrap-up is the last catch-all. Hang-up is
+authorized in the base assistant instructions (the pattern the stock Front Desk
+template uses) rather than a dedicated end node.
 
 ## How to interact
 
-> Phone number and live URLs will be filled in once deployed.
-
-- **Phone:** `+1 ...` (dial to start the workflow)
-- **Dynamic-variables webhook:** `https://<func>.telnyxcompute.com/...`
-- **MCP server:** `https://<func>.telnyxcompute.com/...` (publicly reachable)
+- **Phone:** `+1 ...` ← fill in the assistant's number (dial to start the workflow)
+- **Dynamic-variables webhook:** https://wadeea-dynamic-variables-v3-923bbb9e-9.telnyxcompute.com
+- **MCP server:** https://wadeea-mcp-c722fc30-3.telnyxcompute.com/mcp (publicly reachable; `/health` for liveness)
 
 ## Setup
 
@@ -93,20 +93,64 @@ npm run lint
 npm test            # Vitest
 ```
 
-## Observability — "broken within a minute"
+## Observability
 
-**What we'd see first, and where we'd look:**
+### Structured logging (live)
 
-- **Call starts but the assistant is silent / generic (no personalization):** the dynamic-variables webhook timed out or errored. → Portal **per-conversation webhook logs** (request/response + timing) and our Edge function logs filtered to `event=assistant.initialization`. First signal: webhook latency > `dynamic_variables_webhook_timeout_ms` or non-200 in the portal webhook log.
-- **Assistant fabricates availability/price:** a tool returned a structured "unavailable"/error and the model hallucinated instead of relaying it. → Telnyx **Conversation History** transcript (shows the workflow node + tool call/result) + our MCP logs for that `telnyx_conversation_id`. First signal: tool result = unavailable but assistant spoke a price.
-- **Double-booking / "already booked" for a free car:** FleetInventory reserve race. → our actor logs (`event=reserve`, `latency_ms`, outcome). First signal: two `reserve` successes for the same category in the same window.
-- **Booking never finalizes / loops:** the `create_booking` MCP tool errored or returned non-200. → transcript tool-call step + our MCP logs for `create_booking`. First signal: non-200 / error result on `create_booking`.
+Every webhook call emits one structured JSON line — real production output:
 
-Beyond logs: a counter (MCP tool error rate) and a latency trace of the request path
-Edge Function → KV/Actor → MCP, both keyed by `telnyx_conversation_id`. On demo day we
-walk through one real bug found via these signals — evidence, not vibes.
+```
+[2026-09-29T15:35:12.269Z] {"event":"assistant.initialization","telnyx_conversation_id":"96916a0b-…","node":"dynamic-variables","latency_ms":87,"outcome":"ok","session_outcome":"ok","call_count":3}
+```
 
-**The story we actually lived (demo-day material):** bookings started failing
+Enough context to reconstruct what happened: who called (`telnyx_conversation_id`),
+where (`node`), what happened (`outcome`: `ok` / `signature_invalid` /
+`unexpected_event_type`; `session_outcome`: `ok` / `timeout` / `error`), and how it
+felt (`latency_ms`). No PII.
+
+```bash
+telnyx-edge logs wadeea-dynamic-variables-v3 --tail            # our code's log lines, live
+telnyx-edge logs wadeea-mcp --type invocations --since 1h      # platform: one record per HTTP request
+```
+
+The MCP server logs one structured `tool_call` line per tool invocation (tool, ok,
+`latency_ms`, `telnyx_conversation_id` — never args, no PII) and exposes `GET /stats`,
+an **instant** per-instance counter read that bypasses log ingestion entirely.
+
+Two independent surfaces per function: **runtime** logs (what our code says) and
+**invocation** records (what the platform saw — method, status, duration — emitted
+even if the code logs nothing).
+The platform runs each function as multiple autoscaled instances behind its own
+load balancer; `logs --tail` streams from **all replicas interleaved**, so instance
+churn (new boots, SIGTERM drains during revision swaps) is visible in the same stream.
+
+### Signals beyond logs
+
+- **A latency measurement:** `latency_ms` on every webhook line — the exact number the
+  3000 ms `dynamic_variables_webhook_timeout_ms` budget is judged against (live values:
+  87–153 ms, including the Ed25519 verify and the fenced CallSession actor call).
+- **A counter:** `call_count` in the CallSession actor — a durable per-caller counter
+  incremented on every call, surfaced in the same log line *and* spoken by the
+  assistant (returning-caller greeting), so a stuck counter is audible, not just visible.
+- **An instant counter read:** `GET /stats` on the MCP function — per-tool call/error
+  counts and the last 50 calls, straight from the running instance (a data-plane
+  read: visible on the dashboard within ~2 s, vs the ~30–90 s log-ingestion delay).
+- **A single-request trace:** one `telnyx_conversation_id` correlates all four hops —
+  portal per-conversation webhook log → our webhook runtime line → MCP invocation
+  records → the tool call/result shown inline in the Conversation History transcript
+  (with the active workflow node). That is the request's path through
+  Function → KV/Actor → MCP, reconstructable end to end.
+
+### "Broken within a minute" — what we'd see first, where we'd look
+
+- **Assistant is generic (no personalization / no returning-caller greeting):** the dynamic-variables webhook failed or timed out. → Portal **per-conversation webhook logs** (request/response + timing), then `telnyx-edge logs wadeea-dynamic-variables-v3`. First signal: non-200 in the portal webhook log, or `outcome:"signature_invalid"` in ours — exactly how we caught the missing `TELNYX_PUBLIC_KEY` secret after cutover.
+- **Assistant fabricates availability/price:** a tool returned structured "unavailable" and the model spoke a price anyway. → **Conversation History** transcript (shows node + tool call/result inline). First signal: tool result says unavailable, assistant says a number.
+- **Bookings fail / loop:** `create_booking` erring. → `telnyx-edge logs wadeea-mcp --type invocations` (non-200s / durations), then replay the exact tool call with `curl` against `/mcp`. First signal: `booking_failed` in the tool result — historically this meant the **actor-runtime snapshot bucket is full** (`TooManyObjects`): check object count, run `scripts/janitor.py`.
+- **Everything MCP is down:** `/health` on the function answers instantly and touches no dependency, so it separates "function down" (repoint assistant to the fallback engine) from "dependency down" (bucket/SQLDB — janitor first).
+
+### One thing that broke and how we found it (demo-day)
+
+**The story we actually lived:** bookings started failing
 mid-test with `booking_failed`; invocation logs showed the tool erring inside a
 healthy function; the SQLDB CLI reproduced it as `ShipError … TooManyObjects`;
 listing the account's actor-runtime bucket over S3 showed it capped at 5 objects,
@@ -127,6 +171,7 @@ fallback: [ADR 0002](docs/adr/0002-actor-outage-postgres-fallback.md).
 | MCP server (canonical) | https://wadeea-mcp-c722fc30-3.telnyxcompute.com/mcp | live — assistant attached; 6 tools; FleetInventory actor bookings |
 | Dynamic-variables webhook | https://wadeea-dynamic-variables-v3-923bbb9e-9.telnyxcompute.com | live — Ed25519 verified; CallSession actor; KV flag |
 | Fallback MCP engine | https://wadeea-mcp-server-v3-99a58ff6-c.telnyxcompute.com/mcp | deployed, dormant (failover: repoint the assistant's MCP URL) |
+| Observability dashboard | https://wadeea-observe-23449883-5.telnyxcompute.com/?key=… | live — the dashboard is itself an Edge Function (key in `.env` as `DASH_KEY`) |
 | SQLDB | `wadeea-db-2` (d6b65834-…) | seeded; booking records live |
 | Actors | `FleetInventory` (per category), `CallSession` (per caller) | both live, verified on real calls |
 

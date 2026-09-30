@@ -5,6 +5,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "observe": "tsx observability/src/serve_dashboard.ts",
     "dev": "tsx functions/dynamic-variables/index.ts"
   },
   "dependencies": {

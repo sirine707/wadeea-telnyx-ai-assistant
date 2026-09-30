@@ -77,16 +77,22 @@ export default {
     // ── CallSession actor: per-caller state (graceful when actor layer down) ──
     let session: RecordCallResult = { call_count: 0, last_intent: null, returning_caller: false };
     let sessionOutcome = "no_caller_id";
+    let session_ms = 0;
     if (caller) {
+      const sessionStart = Date.now();
       try {
         session = await withTimeout(sessions(caller).recordCall(), ACTOR_TIMEOUT_MS);
+        session_ms = Date.now() - sessionStart;
         sessionOutcome = "ok";
       } catch {
+        session_ms = Date.now() - sessionStart;
         sessionOutcome = "actor_unavailable";
       }
     }
 
+    const kvStart = Date.now();
     const bookings_enabled = await readBookingsFlag();
+    const kv_ms = Date.now() - kvStart;
 
     const dynamic_variables = {
       session_id: conversationId ?? "",
@@ -109,6 +115,10 @@ export default {
       outcome: "ok",
       session_outcome: sessionOutcome,
       call_count: session.call_count,
+      session_ms,
+      kv_ms,
+      bookings_enabled,
+      returning_caller: session.returning_caller,
     });
 
     return Response.json({ dynamic_variables });

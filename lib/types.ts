@@ -192,8 +192,8 @@ export interface CreateBookingArgs {
   start_date: string;
   duration_days: number;
   customer_name: string;
-  customer_phone: string | null;
-  delivery_area: string | null;
+  customer_phone?: string | null;
+  delivery_area?: string | null;
   booking_id?: string;
 }
 

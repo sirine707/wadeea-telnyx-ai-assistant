@@ -50,6 +50,7 @@ speaks to caller → edges route to the next node.
 /functions/wadeea-dynamic-variables-v3/  webhook box (LIVE): Ed25519 via node:crypto, KV flag, CallSession actor
 /functions/mcp/wadeea-mcp/               MCP box (LIVE): 6 tools, FleetInventory actor, SQLDB binding, hand-rolled MCP
 /functions/mcp/wadeea-mcp-server-v3/     deployed Postgres/Neon fallback engine (failover only)
+/functions/wadeea-observe/               observability dashboard as an Edge Function (LIVE): Telnyx logs REST API + MCP /stats, key-gated
 /lib/                                    shared tested modules (protocol, clients, pure actor logic, fakes)
 /test/                                   Vitest suites (root) — function-local suites live beside their function
 /sql/                                    schema+seed: sqldb_schema_seed.sql (SQLite/SQLDB) and schema.sql+seed.sql (Neon fallback)
@@ -91,7 +92,8 @@ Each Edge Function has its own `func.toml` (classic manifest with `[edge_compute
 ## Observability
 
 - Application logs (Edge functions) + Telnyx Conversation History, Insights, and per-conversation webhook logs (portal). Correlate via `telnyx_conversation_id`; workflow node context appears in transcripts.
-- Log a structured event at each workflow node transition and each tool call (in + out + `latency_ms`).
+- The MCP function logs one structured `tool_call` line per tool invocation (tool, ok, `latency_ms`, `telnyx_conversation_id`; never args/PII) and serves `GET /stats`: in-memory per-instance counters + last 50 calls — the instant signal (no log-ingestion delay).
+- `/observability` — local judge-facing dashboard (`npm run observe`): tails both live functions, polls `/stats`, renders metrics/alerts/traces. Read-only against the platform.
 - At least one signal beyond logs: a counter or a latency trace of a request's path through Function → KV/Actor → MCP.
 - Alert on: dynamic-variables webhook timeouts, MCP tool error rate, FleetInventory reserve failures.
 - README documents the "broken within a minute" story: what we'd see first and where we'd look.
@@ -109,6 +111,7 @@ Each Edge Function has its own `func.toml` (classic manifest with `[edge_compute
 ## Current status
 
 - **LIVE (2026-09-29):** canonical two-box architecture (ADR 0003) — `wadeea-mcp` (6 tools, FleetInventory actor, SQLDB) and `wadeea-dynamic-variables-v3` (Ed25519, KV flag, CallSession actor), both verified on real phone calls; 5 production reservations migrated into the actor and count-verified; `wadeea-mcp-server-v3` retained as deployed failover.
+- **Instrumentation ship (2026-09-29, verified):** `wadeea-mcp` re-shipped with `GET /stats` + per-tool-call structured logging; actor survived the redeploy (`check_availability` returned real data post-ship). Observability dashboard added under `/observability`.
 - Remaining: portal polish (farewell speak node → end_call, Existing Rental branch), README demo package, git commit.
 
 

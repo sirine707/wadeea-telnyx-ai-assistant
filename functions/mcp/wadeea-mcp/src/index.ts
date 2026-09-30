@@ -3,6 +3,8 @@ import * as tools from "./mcp_tools";
 import { handleMcpRequest, toSse, type McpToolDef } from "./mcp_protocol";
 import { SqldbClient, type SqlDatabaseLike } from "./sqldb_client";
 import { CachedSqlClient } from "./cached_sql_client";
+import { StatsRecorder, getToolCallInfo } from "./stats";
+import { summarizeToolIO } from "./tool_io";
 import type { ActorClient, SqlClient, ReserveResult, AvailabilityResult } from "./types";
 
 // Actor class ships with this bundle; the runtime registers the type.
@@ -35,6 +37,13 @@ function deps() {
     _deps = { actor: new FleetActorClient(), sql };
   }
   return _deps;
+}
+
+// Per-instance tool-call counters served on GET /stats (lazy: module scope stays inert).
+let _stats: StatsRecorder | null = null;
+function stats() {
+  if (!_stats) _stats = new StatsRecorder();
+  return _stats;
 }
 
 // ── Tool registry: names, descriptions and JSON Schemas (formerly zod). ──
@@ -91,6 +100,10 @@ export default {
       return Response.json({ ok: true });
     }
 
+    if (url.pathname === "/stats") {
+      return Response.json(stats().snapshot());
+    }
+
     if (url.pathname === "/mcp") {
       if (req.method !== "POST") {
         return Response.json({ error: "method not allowed" }, { status: 405 });
@@ -108,7 +121,35 @@ export default {
       } catch {
         return Response.json({ error: "invalid json" }, { status: 400 });
       }
+      // One instrumentation point for every tool call: count it for /stats and
+      // emit one structured log line (tool + outcome + latency, never args/PII).
+      const call = getToolCallInfo(body);
+      const started = Date.now();
       const outcome = await handleMcpRequest(body, TOOLS);
+      if (call) {
+        const latencyMs = Date.now() - started;
+        const ok =
+          outcome.kind === "response" &&
+          !outcome.body.error &&
+          !(outcome.body.result as { isError?: boolean } | undefined)?.isError;
+        stats().record(call.tool, ok, latencyMs, call.conversationId);
+        const args = (body as any)?.params?.arguments;
+        let resultText: string | null = null;
+        if (outcome.kind === "response") {
+          const content = (outcome.body.result as { content?: Array<{ text?: string }> } | undefined)?.content;
+          resultText = content && content.length > 0 ? (content[0]?.text ?? null) : null;
+        }
+        console.log(
+          JSON.stringify({
+            event: "tool_call",
+            tool: call.tool,
+            ok,
+            latency_ms: latencyMs,
+            telnyx_conversation_id: call.conversationId ?? null,
+            ...summarizeToolIO(args, resultText),
+          }),
+        );
+      }
       if (outcome.kind === "accepted") return new Response(null, { status: 202 });
       if (outcome.kind === "bad_request") return Response.json({ error: outcome.message }, { status: 400 });
       return new Response(toSse(outcome.body), {

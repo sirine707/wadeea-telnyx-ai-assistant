@@ -12,6 +12,6 @@
     "outDir": "./dist",
     "rootDir": "."
   },
-  "include": ["lib/**/*.ts", "test/**/*.ts"],
+  "include": ["lib/**/*.ts", "test/**/*.ts", "observability/**/*.ts"],
   "exclude": ["node_modules", "dist", "functions", "actors"]
 }

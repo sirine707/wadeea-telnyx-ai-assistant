@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import * as tools from "../lib/mcp_tools";
 import { FakeFleetActor, FakeSqlClient, seedFakeSql } from "../lib/fakes";
 import type { ToolDeps } from "../lib/mcp_tools";
@@ -17,6 +17,10 @@ describe("MCP tools", () => {
 
   beforeEach(() => {
     deps = makeDeps();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   describe("check_availability", () => {
@@ -299,6 +303,47 @@ describe("MCP tools", () => {
       const err = (result as { error: string }).error;
       expect(err).toContain("suv");
       expect(err).toContain("sedan");
+    });
+  });
+
+  describe("booking_pipeline log line (per-hop latency evidence)", () => {
+    it("logs actor_ms/sqldb_ms/total_ms and the reserve outcome on a successful booking, without PII", async () => {
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      await tools.createBooking(
+        { category_id: "suv", start_date: "2026-09-26", duration_days: 2, customer_name: "Ali", customer_phone: "+971" },
+        deps,
+      );
+      const line = spy.mock.calls.map((c) => String(c[0])).find((l) => l.includes("booking_pipeline"));
+      expect(line).toBeDefined();
+      const parsed = JSON.parse(line as string);
+      expect(parsed.event).toBe("booking_pipeline");
+      expect(parsed.category_id).toBe("suv");
+      expect(parsed.reserve).toBe("ok");
+      expect(typeof parsed.actor_ms).toBe("number");
+      expect(typeof parsed.sqldb_ms).toBe("number");
+      expect(typeof parsed.total_ms).toBe("number");
+      expect(parsed.booking_id).toBeTruthy();
+      expect(line).not.toContain("Ali");
+      expect(line).not.toContain("+971");
+    });
+
+    it("logs the refusal path (reserve=unavailable) too", async () => {
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      // fill capacity: suv has 3 units in the seeded fakes
+      for (let i = 0; i < 3; i++) {
+        await tools.createBooking(
+          { category_id: "suv", start_date: "2026-09-26", duration_days: 2, customer_name: "X" },
+          deps,
+        );
+      }
+      spy.mockClear();
+      await tools.createBooking(
+        { category_id: "suv", start_date: "2026-09-26", duration_days: 2, customer_name: "X" },
+        deps,
+      );
+      const line = spy.mock.calls.map((c) => String(c[0])).find((l) => l.includes("booking_pipeline"));
+      expect(line).toBeDefined();
+      expect(JSON.parse(line as string).reserve).toBe("unavailable");
     });
   });
 });
