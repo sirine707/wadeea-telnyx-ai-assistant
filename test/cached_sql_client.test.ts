@@ -37,6 +37,10 @@ class CountingSqlClient implements SqlClient {
     this.bump("lookupBooking");
     return null;
   }
+  async deleteBooking(_id: string): Promise<{ deleted: boolean }> {
+    this.bump("deleteBooking");
+    return { deleted: false };
+  }
   async lookupBookingsByPhone(_p: string): Promise<BookingRecord[]> {
     this.bump("lookupBookingsByPhone");
     return [];

@@ -104,6 +104,10 @@ export class CachedSqlClient implements SqlClient {
     return this.inner.lookupBooking(bookingId);
   }
 
+  deleteBooking(bookingId: string): Promise<{ deleted: boolean }> {
+    return this.inner.deleteBooking(bookingId);
+  }
+
   lookupBookingsByPhone(phone: string): Promise<BookingRecord[]> {
     return this.inner.lookupBookingsByPhone(phone);
   }

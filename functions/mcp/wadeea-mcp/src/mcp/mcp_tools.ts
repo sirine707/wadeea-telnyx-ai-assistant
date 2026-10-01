@@ -156,6 +156,20 @@ export async function createBooking(
   }
 }
 
+// Cancels a booking: removes the record first, then frees the car in the
+// actor. Record-first means a failure can leave a car held, but can never
+// leave a car free while a booking still claims it (no double-booking).
+export async function cancelBooking(
+  args: { booking_id: string },
+  deps: ToolDeps,
+): Promise<{ ok: true; booking_id: string } | { ok: false; reason: string }> {
+  const booking = await deps.sql.lookupBooking(args.booking_id);
+  if (!booking) return { ok: false, reason: "booking not found" };
+  await deps.sql.deleteBooking(args.booking_id);
+  await deps.actor.release(booking.category_id, args.booking_id);
+  return { ok: true, booking_id: args.booking_id };
+}
+
 export async function getDocumentRequirements(
   args: GetDocumentRequirementsArgs,
   deps: ToolDeps,

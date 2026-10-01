@@ -107,7 +107,7 @@ setInterval(function () {
   $("clock").textContent = new Date().toISOString().slice(0, 19).replace("T", " ") + "Z";
 }, 1000);
 
-var FUNC_TITLES = { webhook: "Dynamic-variables webhook", mcp: "MCP server (6 tools + FleetInventory actor)" };
+var FUNC_TITLES = { webhook: "Dynamic-variables webhook", mcp: "MCP server (7 tools + FleetInventory actor)" };
 var EXTRA_KEYS = ["latency_ms", "call_count", "session_outcome", "session_ms", "kv_ms", "bookings_enabled",
   "returning_caller", "is_uae_caller", "node", "tool", "reserve", "actor_ms", "sqldb_ms", "total_ms", "booking_id"];
 var flat = function (obj, name) { // one-level object -> "name(k=v ...)"

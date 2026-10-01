@@ -73,6 +73,12 @@ const TOOLS: McpToolDef[] = [
     handler: (a) => tools.createBooking(a as never, deps()),
   },
   {
+    name: "cancel_booking",
+    description: "Cancel an existing booking by booking ID: frees the car and removes the booking",
+    inputSchema: { type: "object", properties: { booking_id: str }, required: ["booking_id"] },
+    handler: (a) => tools.cancelBooking(a as never, deps()),
+  },
+  {
     name: "get_document_requirements",
     description: "Get required documents for renting",
     inputSchema: { type: "object", properties: { visitor_type: str }, required: [] },

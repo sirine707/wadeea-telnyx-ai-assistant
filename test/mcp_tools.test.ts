@@ -389,4 +389,36 @@ describe("MCP tools", () => {
       expect(results.filter((r) => !r.ok).every((r) => r.reason === "unavailable")).toBe(true);
     });
   });
+
+  describe("cancel_booking (frees the car AND removes the record)", () => {
+    const book = (id: string) =>
+      tools.createBooking(
+        { category_id: "luxury", start_date: "2026-12-01", duration_days: 2, customer_name: "X", customer_phone: "+971501234567", booking_id: id },
+        deps,
+      );
+    const luxuryFree = async () =>
+      ((await tools.checkAvailability({ category_id: "luxury", start_date: "2026-12-01", duration_days: 2 }, deps)) as { units_available: number }).units_available;
+
+    it("frees the reserved car so it can be booked again", async () => {
+      await book("L1");
+      await book("L2");
+      expect(await luxuryFree()).toBe(0);
+      const r = await tools.cancelBooking({ booking_id: "L1" }, deps);
+      expect(r).toEqual({ ok: true, booking_id: "L1" });
+      expect(await luxuryFree()).toBe(1);
+    });
+
+    it("removes the booking record", async () => {
+      await book("L3");
+      await tools.cancelBooking({ booking_id: "L3" }, deps);
+      expect(await tools.lookupBooking({ booking_id: "L3" }, deps)).toEqual({ error: "booking not found" });
+    });
+
+    it("returns booking not found for an unknown id (and for a second cancel)", async () => {
+      expect(await tools.cancelBooking({ booking_id: "nope" }, deps)).toEqual({ ok: false, reason: "booking not found" });
+      await book("L4");
+      await tools.cancelBooking({ booking_id: "L4" }, deps);
+      expect(await tools.cancelBooking({ booking_id: "L4" }, deps)).toEqual({ ok: false, reason: "booking not found" });
+    });
+  });
 });

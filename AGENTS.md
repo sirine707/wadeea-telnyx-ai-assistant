@@ -48,7 +48,7 @@ speaks to caller → edges route to the next node.
 
 ```
 /functions/wadeea-dynamic-variables-v3/  webhook box (LIVE): src/{actors,shared}: Ed25519, UAE phone, KV flag, CallSession actor
-/functions/mcp/wadeea-mcp/               MCP box (LIVE): src/{actors,mcp,storage,shared,observability}: 6 tools, FleetInventory actor, SQLDB
+/functions/mcp/wadeea-mcp/               MCP box (LIVE): src/{actors,mcp,storage,shared,observability}: 7 tools, FleetInventory actor, SQLDB
 /functions/wadeea-observe/               observability dashboard as an Edge Function (LIVE): Telnyx logs REST API + MCP /stats, key-gated
 /lib/                                    shared tested modules (protocol, clients, pure actor logic, fakes)
 /test/                                   Vitest suites (root) — function-local suites live beside their function
@@ -109,7 +109,7 @@ Each Edge Function has its own `func.toml` (classic manifest with `[edge_compute
 
 ## Current status
 
-- **LIVE (2026-09-29):** canonical two-box architecture (ADR 0003) — `wadeea-mcp` (6 tools, FleetInventory actor, SQLDB) and `wadeea-dynamic-variables-v3` (Ed25519, KV flag, CallSession actor), both verified on real phone calls; 5 production reservations migrated into the actor and count-verified.
+- **LIVE (2026-09-29):** canonical two-box architecture (ADR 0003) — `wadeea-mcp` (7 tools, FleetInventory actor, SQLDB) and `wadeea-dynamic-variables-v3` (Ed25519, KV flag, CallSession actor), both verified on real phone calls; 5 production reservations migrated into the actor and count-verified.
 - **Instrumentation ship (2026-09-29, verified):** `wadeea-mcp` re-shipped with `GET /stats` + per-tool-call structured logging; actor survived the redeploy (`check_availability` returned real data post-ship). Observability dashboard added under `/observability`.
 - Remaining: portal polish (farewell speak node → end_call, Existing Rental branch), README demo package, git commit.
 
@@ -121,6 +121,7 @@ Each Edge Function has its own `func.toml` (classic manifest with `[edge_compute
 | `check_availability` | New Booking | SQL (total_units) + Actor (reservations) | — |
 | `get_quote` | New Booking | SQL (pricing) | — |
 | `create_booking` | New Booking | SQL (pricing, total_units) | Actor (reserve) + SQL (booking record) |
+| `cancel_booking` | Existing Rental | SQL (bookings) | SQL (delete record) + Actor (release) |
 | `get_document_requirements` | Documents | SQL (document_requirements) | — |
 | `get_rental_rules` | Documents | SQL (rental_rules) | — |
 | `lookup_booking` | Existing Rental | SQL (bookings) | — |

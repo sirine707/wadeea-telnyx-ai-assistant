@@ -32,7 +32,7 @@ atomic operations behind it.
        ▼                         ▼
 ┌─────────────────────┐   ┌─────────────────────────────┐
 │ Edge Fn: webhook    │   │ Edge Fn: MCP server         │
-│ (dynamic-variables) │   │ (wadeea-mcp, 6 tools,       │
+│ (dynamic-variables) │   │ (wadeea-mcp, 7 tools,       │
 │  Ed25519 verify     │   │  hand-rolled protocol)      │
 │ ┌─────┐ ┌─────────┐ │   │ ┌──────────────┐ ┌───────┐  │
 │ │ KV  │ │CallSess │ │   │ │FleetInventory│ │ SQLDB │  │
@@ -50,7 +50,7 @@ atomic operations behind it.
 
 - **AI Assistant (Telnyx)** — conversation driver: instructions, greeting, `conversation_flow` (prompt/speak nodes + LLM/expression/default edges), attached MCP server, dynamic-variables webhook, Transfer/hangup tools (scoped per node). Callable via phone number.
 - **Conversation Workflow** — LLM edges decide *intent*; the expression edge on `booking_gate` decides *system state* (`bookings_enabled` from KV); speak nodes deliver verbatim wording (greeting disclosure, deposit hold notice, paused message).
-- **Custom MCP server** (Edge function) — 6 tools: `check_availability`, `get_quote`, `create_booking` (UAE-phone enforcement + normalization), `get_document_requirements`, `get_rental_rules`, `lookup_booking`. Telnyx injects `telnyx_conversation_id` per call; every tool call is logged (args/result whitelists, no PII) and counted on `GET /stats`.
+- **Custom MCP server** (Edge function) — 7 tools: `check_availability`, `get_quote`, `create_booking` (UAE-phone enforcement + normalization), `cancel_booking` (removes the record, then frees the car), `get_document_requirements`, `get_rental_rules`, `lookup_booking`. Telnyx injects `telnyx_conversation_id` per call; every tool call is logged (args/result whitelists, no PII) and counted on `GET /stats`.
 - **Dynamic-variables webhook** (Edge function) — Ed25519-verified; returns 12 per-caller variables (`call_count`, `returning_caller`, `caller_number`, `is_uae_caller`, `bookings_enabled`, …) that personalize the greeting and drive expression-edge routing. Per-hop timings (`kv_ms`, `session_ms`) logged each call.
 - **KV** — the `flag/bookings_enabled` kill switch: one CLI write flips the booking path with no redeploy.
 - **Actors** — `FleetInventory` (per category): atomic check-and-reserve, prevents double-booking; `CallSession` (per caller): returning-caller memory.
@@ -83,6 +83,28 @@ template uses) rather than a dedicated end node.
 - **Phone:** **+1 (737) 335-1093** — dial to talk to Wadeea (starts the workflow)
 - **Dynamic-variables webhook:** https://wadeea-dynamic-variables-v3-923bbb9e-9.telnyxcompute.com
 - **MCP server:** https://wadeea-mcp-c722fc30-3.telnyxcompute.com/mcp (publicly reachable; `/health` for liveness)
+
+### Try it — test scenarios
+
+Call **+1 (737) 335-1093**. Fleet: SUV (3 cars), Sedan (5), Luxury (2), Economy (4).
+Any UAE-format number works as a contact number, e.g. `050 123 4567`.
+
+| # | Say | Expected |
+|---|---|---|
+| 1 | "I'd like to rent an SUV from October 10 for 3 days, delivered to Dubai Marina." Then give a name and `050 123 4567`, and accept the quote. | Availability check → quote (AED 250/day) → verbatim deposit-hold notice → booking confirmed with a booking ID |
+| 2 | "Can you look up booking ‹ID from #1›?" | Reads back the booking (car, dates) |
+| 3 | "Please cancel booking ‹ID›." | Confirms with you, cancels; the car is free again |
+| 4 | Book **Luxury** for the same dates three times (on separate calls) | First two succeed, the third is told it's unavailable — no double-booking |
+| 5 | "I want to rent a Mercedes." | Offers the real categories instead of inventing a car |
+| 6 | Give a US number (`+1 415 555 2671`) as the contact number | Refuses; asks for a UAE number (enforced by the tool, not the prompt) |
+| 7 | "What documents do I need as a tourist?" | Passport, international driving permit, credit card |
+| 8 | "How much is the deposit? What's the minimum age?" | AED 1,500; 21 |
+| 9 | "I want my deposit back." / "Can I talk to a human?" | Hands off to a human; if the transfer fails, offers to take a message |
+
+Operator test (needs CLI access): set `flag/bookings_enabled` to `false` in KV, call and ask to
+book → the booking-paused message, no redeploy. Commands in [DEMO.md](DEMO.md).
+
+Everything above is visible live on the observability dashboard (URL in "Status" below).
 
 ## Setup
 
@@ -193,7 +215,7 @@ fallback: [ADR 0002](docs/adr/0002-actor-outage-postgres-fallback.md).
 
 | Component | URL / ID | State |
 |---|---|---|
-| MCP server (canonical) | https://wadeea-mcp-c722fc30-3.telnyxcompute.com/mcp | live — assistant attached; 6 tools; FleetInventory actor bookings |
+| MCP server (canonical) | https://wadeea-mcp-c722fc30-3.telnyxcompute.com/mcp | live — assistant attached; 7 tools; FleetInventory actor bookings |
 | Dynamic-variables webhook | https://wadeea-dynamic-variables-v3-923bbb9e-9.telnyxcompute.com | live — Ed25519 verified; CallSession actor; KV flag |
 | Observability dashboard | https://wadeea-observe-23449883-5.telnyxcompute.com/?key=… | live — the dashboard is itself an Edge Function (key in `.env` as `DASH_KEY`) |
 | SQLDB | `wadeea-db-2` (d6b65834-…) | seeded; booking records live |

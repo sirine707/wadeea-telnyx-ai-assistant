@@ -67,6 +67,10 @@ export class FakeSqlClient implements SqlClient {
     return this.bookings.get(bookingId) ?? null;
   }
 
+  async deleteBooking(bookingId: string): Promise<{ deleted: boolean }> {
+    return { deleted: this.bookings.delete(bookingId) };
+  }
+
   async lookupBookingsByPhone(phone: string): Promise<BookingRecord[]> {
     return [...this.bookings.values()].filter((b) => b.customer_phone === phone);
   }

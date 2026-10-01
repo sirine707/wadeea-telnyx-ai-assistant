@@ -63,6 +63,11 @@ export class SqldbClient implements SqlClient {
     return this.db.prepare("SELECT * FROM bookings WHERE booking_id = ?").bind(bookingId).first<BookingRecord>();
   }
 
+  async deleteBooking(bookingId: string): Promise<{ deleted: boolean }> {
+    const { meta } = await this.db.prepare("DELETE FROM bookings WHERE booking_id = ?").bind(bookingId).run();
+    return { deleted: (meta.changes ?? 0) > 0 };
+  }
+
   async lookupBookingsByPhone(phone: string): Promise<BookingRecord[]> {
     const { results } = await this.db
       .prepare("SELECT * FROM bookings WHERE customer_phone = ? ORDER BY created_at DESC")

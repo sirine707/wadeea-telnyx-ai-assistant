@@ -152,6 +152,7 @@ export interface SqlClient {
   getPricing(categoryId: string): Promise<Pricing | null>;
   insertBooking(booking: BookingRecord): Promise<{ created: boolean }>;
   lookupBooking(bookingId: string): Promise<BookingRecord | null>;
+  deleteBooking(bookingId: string): Promise<{ deleted: boolean }>;
   lookupBookingsByPhone(phone: string): Promise<BookingRecord[]>;
   getDocumentRequirements(visitorType?: string): Promise<DocumentRequirement[]>;
   getRentalRules(): Promise<RentalRule[]>;
