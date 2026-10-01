@@ -87,22 +87,36 @@ template uses) rather than a dedicated end node.
 ## Setup
 
 ```bash
-# Telnyx Inference via OpenCode (dogfood Telnyx-hosted LLMs)
+# 1. Telnyx Inference via OpenCode (the AI coding harness — see opencode.jsonc)
 opencode plugin @telnyx/opencode
 opencode auth login --provider telnyx --method "API Key"
 # pick a model via the /telnyx TUI command
 
-# Edge Compute
-telnyx-edge new-func wadeea-dynamic-variables -l typescript
-telnyx-edge new-func wadeea-mcp -l typescript
-# edit func.toml to add KV + actor bindings
-telnyx-edge ship
-
-# Local checks before considering work done
+# 2. Local checks
+npm install
 npm run typecheck   # tsc --noEmit
-npm run lint
 npm test            # Vitest
+
+# 3. Data: SQLDB schema + seed, KV feature flag
+telnyx-edge storage sqldb execute <sqldb-id> --file sql/sqldb_schema_seed.sql --remote
+telnyx-edge storage kv key put <kv-namespace-id> flag/bookings_enabled true
+
+# 4. Secrets
+telnyx-edge secrets add TELNYX_PUBLIC_KEY <org-public-key>   # webhook signature verification
+telnyx-edge secrets add TELNYX_API_KEY <api-key>             # dashboard reads the logs API
+telnyx-edge secrets add DASH_KEY <random-key>                # dashboard access key
+
+# 5. Deploy (bindings live in each function's telnyx.toml / func.toml)
+cd functions/mcp/wadeea-mcp && rm -rf .telnyx && telnyx-edge ship
+cd ../../wadeea-dynamic-variables-v3 && rm -rf .telnyx && telnyx-edge ship
+cd ../wadeea-observe && rm -rf .telnyx && telnyx-edge ship
+
+# 6. While writing to SQLDB or actors: keep the snapshot-bucket janitor running
+python3 scripts/janitor.py --loop   # needs TELNYX_API_KEY
 ```
+
+Then, in the Telnyx portal, point the assistant at the MCP URL (`…/mcp`) and set the
+dynamic-variables webhook URL (both under "Status" below).
 
 ## Observability
 
