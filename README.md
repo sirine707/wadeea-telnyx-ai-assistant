@@ -216,6 +216,49 @@ era), ADR 0001 (original design).
    (typecheck, tests, bare-Node bundle load), ship rarely.
 
 
+## Development harness — OpenCode on Telnyx Inference
+
+Built with OpenCode using Telnyx-hosted models through the `@telnyx/opencode` plugin.
+
+| Piece | Where | Role |
+|---|---|---|
+| Config | `opencode.jsonc` | Telnyx plugin; main model `telnyx/zai-org/GLM-5.2`; `small_model` MiniMax-M3 for session titles; auto-compaction with pruning off (keeps the cached prefix stable); shell commands require approval |
+| Rules | `AGENTS.md` | Loaded into every session: scope, "never invent Telnyx behavior", tools own all data, no PII in logs, typecheck + tests before done |
+| Commands | `.opencode/commands/` | `/verify`, `/tdd`, `/preship`, `/trace`, `/flag` |
+| Skills | `.opencode/skills/` | Deploy, actor pattern, MCP tool authoring, workflow design, observability — lessons from this build, loaded on demand |
+
+**Workflow:** failing tests written first as the spec → scoped prompt naming exact files → model implements to green → diff reviewed before any deploy.
+
+### Session metrics (the Wadeea project session, 25 Sep – 1 Oct 2026)
+
+| Metric | Value |
+|---|---|
+| Model | `telnyx/zai-org/GLM-5.2` (thinking variant) |
+| Prompts / model steps | 44 / 382 |
+| Tool calls | 420 — bash 160 (tests, typechecks, CLI), edit 74, read 71, write 57, webfetch 33 (Telnyx docs), todowrite 13, glob 7, grep 3 |
+| File changes | 120 |
+| Input tokens | 7.6 M full price + **64.4 M from cache (89%)** |
+| Output tokens | 104 K |
+
+Caching is automatic prefix caching on Telnyx-hosted GLM. A direct test sending the same
+~3,084-token prompt twice returned `cached_tokens: 0`, then `3072` on the second call
+(GLM-5.2 and GLM-5.1-FP8).
+
+**Sources**
+- Session metrics: OpenCode's local database `~/.local/share/opencode/opencode.db` (read-only) —
+  `session` table (`model`, `tokens_input`, `tokens_output`, `tokens_cache_read`), `message` table
+  (roles) and `part` table (tool calls, patches) for that session. OpenCode's `cost` field reads 0
+  because it doesn't know Telnyx prices; real spend is in the
+  [Telnyx Inference dashboard](https://portal.telnyx.com/#/ai/reports/dashboard?product=inference)
+  and `GET /v2/spend_limits`.
+- Cache test: `POST https://api.telnyx.com/v2/ai/chat/completions`, field
+  `usage.prompt_tokens_details.cached_tokens`.
+- OpenCode docs: [config](https://opencode.ai/docs/config/), [rules / AGENTS.md](https://opencode.ai/docs/rules/),
+  [commands](https://opencode.ai/docs/commands/), [skills](https://opencode.ai/docs/skills/),
+  [agents](https://opencode.ai/docs/agents/).
+- Telnyx docs: [spending limits](https://developers.telnyx.com/docs/inference/spending-limits),
+  [inference pricing](https://developers.telnyx.com/docs/inference/models/pricing).
+
 ## Working in this repo
 
 Read [AGENTS.md](AGENTS.md) first. Product scope, boundaries, conventions, testing,

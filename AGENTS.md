@@ -92,7 +92,7 @@ Each Edge Function has its own `func.toml` (classic manifest with `[edge_compute
 
 - Application logs (Edge functions) + Telnyx Conversation History, Insights, and per-conversation webhook logs (portal). Correlate via `telnyx_conversation_id`; workflow node context appears in transcripts.
 - The MCP function logs one structured `tool_call` line per tool invocation (tool, ok, `latency_ms`, `telnyx_conversation_id`; never args/PII) and serves `GET /stats`: in-memory per-instance counters + last 50 calls — the instant signal (no log-ingestion delay).
-- `/observability` — local judge-facing dashboard (`npm run observe`): tails both live functions, polls `/stats`, renders metrics/alerts/traces. Read-only against the platform.
+- Observability dashboard: deployed as `functions/wadeea-observe` (public, key-gated; reads the Telnyx logs API, MCP `/stats`, and the conversations API), with a local variant in `/observability` (`npm run observe`). Shows metrics, alerts, the log stream, and per-call node traces. Read-only against the platform.
 - At least one signal beyond logs: a counter or a latency trace of a request's path through Function → KV/Actor → MCP.
 - Alert on: dynamic-variables webhook timeouts, MCP tool error rate, FleetInventory reserve failures.
 - README documents the "broken within a minute" story: what we'd see first and where we'd look.

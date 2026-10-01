@@ -6,5 +6,19 @@
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
     "@telnyx/opencode"
-  ]
+  ],
+
+  // Main coding model, served by Telnyx. Measured: repeated prompts get ~3,072
+  // of ~3,084 input tokens from cache (automatic prefix caching).
+  "model": "telnyx/zai-org/GLM-5.2",
+
+  // Lightweight background jobs (session titles etc.) go to a cheaper model.
+  "small_model": "telnyx/MiniMaxAI/MiniMax-M3-MXFP8",
+
+  // prune off: keeps the prompt prefix stable so the cache keeps hitting.
+  "compaction": { "auto": true, "prune": false },
+
+  // Ask before running shell commands, so nothing deploys (telnyx-edge ship)
+  // without a human approving it.
+  "permission": { "bash": "ask" }
 }

@@ -374,4 +374,19 @@ describe("MCP tools", () => {
       expect((avail as { units_available: number }).units_available).toBe(3);
     });
   });
+
+  describe("create_booking under concurrent load (no double-booking)", () => {
+    it("grants exactly total_units bookings when many callers race for the same dates", async () => {
+      const results = await Promise.all(
+        Array.from({ length: 10 }, (_, i) =>
+          tools.createBooking(
+            { category_id: "suv", start_date: "2026-11-01", duration_days: 2, customer_name: `C${i}`, customer_phone: "+971501234567" },
+            deps,
+          ),
+        ),
+      );
+      expect(results.filter((r) => r.ok).length).toBe(3); // suv has 3 units
+      expect(results.filter((r) => !r.ok).every((r) => r.reason === "unavailable")).toBe(true);
+    });
+  });
 });
