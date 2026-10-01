@@ -1,4 +1,4 @@
-import { ReservationStore, type ReservationStorage } from "./reservation_store";
+import { applyReserve, applyRelease, countAvailable, type StoredReservation } from "./reservation_logic";
 import type {
   ActorClient,
   SqlClient,
@@ -7,70 +7,31 @@ import type {
   RentalRule,
   DocumentRequirement,
   BookingRecord,
-  Reservation,
   ReserveResult,
   AvailabilityResult,
 } from "./types";
 
-export class InMemoryReservationStorage implements ReservationStorage {
-  private map = new Map<string, Reservation>();
-
-  getById(bookingId: string): Reservation | undefined {
-    return this.map.get(bookingId);
-  }
-
-  countOverlapping(startDate: string, endDate: string): number {
-    let count = 0;
-    for (const r of this.map.values()) {
-      if (r.status === "confirmed" && r.start_date < endDate && startDate < r.end_date) {
-        count++;
-      }
-    }
-    return count;
-  }
-
-  insert(r: Reservation): void {
-    this.map.set(r.booking_id, r);
-  }
-
-  delete(bookingId: string): void {
-    this.map.delete(bookingId);
-  }
-}
-
 export class FakeFleetActor implements ActorClient {
-  private stores = new Map<string, ReservationStore>();
+  private byCategory = new Map<string, StoredReservation[]>();
 
-  private getStore(categoryId: string): ReservationStore {
-    let s = this.stores.get(categoryId);
-    if (!s) {
-      s = new ReservationStore(new InMemoryReservationStorage());
-      this.stores.set(categoryId, s);
-    }
-    return s;
+  private list(categoryId: string): StoredReservation[] {
+    return this.byCategory.get(categoryId) ?? [];
   }
 
-  async reserve(
-    categoryId: string,
-    bookingId: string,
-    startDate: string,
-    endDate: string,
-    totalUnits: number,
-  ): Promise<ReserveResult> {
-    return this.getStore(categoryId).reserve(bookingId, startDate, endDate, totalUnits);
+  async reserve(categoryId: string, bookingId: string, startDate: string, endDate: string, totalUnits: number): Promise<ReserveResult> {
+    const { reservations, result } = applyReserve(this.list(categoryId), bookingId, startDate, endDate, totalUnits);
+    if (result.ok && !result.idempotent) this.byCategory.set(categoryId, reservations);
+    return result;
   }
 
   async release(categoryId: string, bookingId: string): Promise<{ ok: boolean }> {
-    return this.getStore(categoryId).release(bookingId);
+    const { reservations, found } = applyRelease(this.list(categoryId), bookingId);
+    this.byCategory.set(categoryId, reservations);
+    return { ok: found };
   }
 
-  async checkAvailability(
-    categoryId: string,
-    startDate: string,
-    endDate: string,
-    totalUnits: number,
-  ): Promise<AvailabilityResult> {
-    return this.getStore(categoryId).checkAvailability(startDate, endDate, totalUnits);
+  async checkAvailability(categoryId: string, startDate: string, endDate: string, totalUnits: number): Promise<AvailabilityResult> {
+    return countAvailable(this.list(categoryId), startDate, endDate, totalUnits);
   }
 }
 
@@ -171,64 +132,3 @@ export function seedFakeSql(sql: FakeSqlClient): void {
 
 // ── Fake for the Postgres reservation fallback (ADR-0002) ──
 
-import type { AtomicReservationDb, AtomicReserveOutcome } from "./sql_reservation_client";
-
-interface FakeSqlReservation {
-  booking_id: string;
-  category_id: string;
-  start_date: string;
-  end_date: string;
-  status: string;
-}
-
-export class InMemoryAtomicReservationDb implements AtomicReservationDb {
-  private rows = new Map<string, FakeSqlReservation>();
-
-  // Atomic by construction: no awaits between check and insert, so each call
-  // runs to completion before the next — mirroring the real impl's transaction.
-  async reserveAtomic(
-    categoryId: string,
-    bookingId: string,
-    startDate: string,
-    endDate: string,
-    totalUnits: number,
-  ): Promise<AtomicReserveOutcome> {
-    if (this.rows.has(bookingId)) return { inserted: false, existing: true };
-    const overlapping = this.count(categoryId, startDate, endDate);
-    if (overlapping >= totalUnits) return { inserted: false, existing: false };
-    this.rows.set(bookingId, {
-      booking_id: bookingId,
-      category_id: categoryId,
-      start_date: startDate,
-      end_date: endDate,
-      status: "confirmed",
-    });
-    return { inserted: true, existing: false };
-  }
-
-  async release(categoryId: string, bookingId: string): Promise<{ found: boolean }> {
-    const row = this.rows.get(bookingId);
-    if (!row || row.category_id !== categoryId) return { found: false };
-    this.rows.delete(bookingId);
-    return { found: true };
-  }
-
-  async countOverlapping(categoryId: string, startDate: string, endDate: string): Promise<number> {
-    return this.count(categoryId, startDate, endDate);
-  }
-
-  private count(categoryId: string, startDate: string, endDate: string): number {
-    let n = 0;
-    for (const r of this.rows.values()) {
-      if (
-        r.category_id === categoryId &&
-        r.status === "confirmed" &&
-        r.start_date < endDate &&
-        startDate < r.end_date
-      ) {
-        n++;
-      }
-    }
-    return n;
-  }
-}

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { addDays } from "./date_utils";
+import { normalizeUae } from "./phone";
 import type {
   ActorClient,
   SqlClient,
@@ -83,6 +84,14 @@ export async function createBooking(
   deps: ToolDeps,
 ): Promise<CreateBookingResult> {
   const t0 = Date.now();
+
+  // Bookings require a UAE contact number — enforced and normalized here,
+  // deterministically, so the model never has to know phone formats.
+  const customerPhone = args.customer_phone ? normalizeUae(args.customer_phone) : null;
+  if (!customerPhone) {
+    return { ok: false, reason: "invalid_phone" };
+  }
+
   const categoryId = normalizeCategoryId(args.category_id);
   const category = await deps.sql.getCategory(categoryId);
   if (!category) return { ok: false, reason: "category not found" };
@@ -116,7 +125,7 @@ export async function createBooking(
     const insertResult = await deps.sql.insertBooking({
       booking_id,
       customer_name: args.customer_name,
-      customer_phone: args.customer_phone ?? null,
+      customer_phone: customerPhone,
       category_id: categoryId,
       start_date: args.start_date,
       end_date,

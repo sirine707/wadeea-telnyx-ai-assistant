@@ -172,7 +172,7 @@ describe("MCP tools", () => {
           start_date: "2026-09-26",
           duration_days: 1,
           customer_name: "Ahmed",
-          customer_phone: null,
+          customer_phone: "+971501234567",
           delivery_area: null,
         },
         deps,
@@ -286,7 +286,7 @@ describe("MCP tools", () => {
           start_date: "2026-10-10",
           duration_days: 2,
           customer_name: "Case Test",
-          customer_phone: null,
+          customer_phone: "+971501234567",
           delivery_area: null,
         },
         deps,
@@ -310,7 +310,7 @@ describe("MCP tools", () => {
     it("logs actor_ms/sqldb_ms/total_ms and the reserve outcome on a successful booking, without PII", async () => {
       const spy = vi.spyOn(console, "log").mockImplementation(() => {});
       await tools.createBooking(
-        { category_id: "suv", start_date: "2026-09-26", duration_days: 2, customer_name: "Ali", customer_phone: "+971" },
+        { category_id: "suv", start_date: "2026-09-26", duration_days: 2, customer_name: "Ali", customer_phone: "+971501234567" },
         deps,
       );
       const line = spy.mock.calls.map((c) => String(c[0])).find((l) => l.includes("booking_pipeline"));
@@ -324,7 +324,7 @@ describe("MCP tools", () => {
       expect(typeof parsed.total_ms).toBe("number");
       expect(parsed.booking_id).toBeTruthy();
       expect(line).not.toContain("Ali");
-      expect(line).not.toContain("+971");
+      expect(line).not.toContain("+971501234567");
     });
 
     it("logs the refusal path (reserve=unavailable) too", async () => {
@@ -332,18 +332,46 @@ describe("MCP tools", () => {
       // fill capacity: suv has 3 units in the seeded fakes
       for (let i = 0; i < 3; i++) {
         await tools.createBooking(
-          { category_id: "suv", start_date: "2026-09-26", duration_days: 2, customer_name: "X" },
+          { category_id: "suv", start_date: "2026-09-26", duration_days: 2, customer_name: "X", customer_phone: "+971501234567" },
           deps,
         );
       }
       spy.mockClear();
       await tools.createBooking(
-        { category_id: "suv", start_date: "2026-09-26", duration_days: 2, customer_name: "X" },
+        { category_id: "suv", start_date: "2026-09-26", duration_days: 2, customer_name: "X", customer_phone: "+971501234567" },
         deps,
       );
       const line = spy.mock.calls.map((c) => String(c[0])).find((l) => l.includes("booking_pipeline"));
       expect(line).toBeDefined();
       expect(JSON.parse(line as string).reserve).toBe("unavailable");
+    });
+  });
+
+  describe("create_booking UAE phone enforcement (deterministic, tool-level)", () => {
+    const base = { category_id: "suv", start_date: "2026-09-26", duration_days: 2, customer_name: "Ali" };
+
+    it("refuses a non-UAE customer_phone with a structured invalid_phone reason", async () => {
+      const r = await tools.createBooking({ ...base, customer_phone: "+14155552671" }, deps);
+      expect(r).toEqual({ ok: false, reason: "invalid_phone" });
+    });
+
+    it("refuses a missing customer_phone", async () => {
+      const r = await tools.createBooking({ ...base }, deps);
+      expect(r).toEqual({ ok: false, reason: "invalid_phone" });
+    });
+
+    it("accepts a UAE customer_phone and books", async () => {
+      const r = await tools.createBooking({ ...base, customer_phone: "00971501234567" }, deps);
+      expect(r.ok).toBe(true);
+    });
+
+    it("does not reserve anything when the phone is refused", async () => {
+      await tools.createBooking({ ...base, customer_phone: "+14155552671" }, deps);
+      const avail = await tools.checkAvailability(
+        { category_id: "suv", start_date: "2026-09-26", duration_days: 2 },
+        deps,
+      );
+      expect((avail as { units_available: number }).units_available).toBe(3);
     });
   });
 });

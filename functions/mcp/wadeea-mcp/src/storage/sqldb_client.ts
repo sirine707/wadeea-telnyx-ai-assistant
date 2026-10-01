@@ -5,7 +5,7 @@ import type {
   BookingRecord,
   RentalRule,
   DocumentRequirement,
-} from "./types";
+} from "../shared/types";
 
 // Structural view of the Telnyx SQLDB binding (D1-style prepare/bind/all).
 export interface SqlPreparedLike {

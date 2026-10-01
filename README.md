@@ -11,40 +11,51 @@ Telnyx AI Assistant drives the call; Telnyx Edge Compute provides the data and t
 atomic operations behind it.
 
 ```
-┌──────────────┐
-│  Caller       │
-└──────┬───────┘
-       ▼
-┌──────────────────────────────────────────────┐
-│  Telnyx AI Assistant                          │
-│  Conversation Workflow (conversation_flow):    │
-│   Greeting (speak) → Identify Intent (prompt) │
-│      ├── New Booking (prompt)                  │
-│      ├── Existing Rental (prompt)              │
-│      └── Escalate (prompt / handoff)            │
-└───┬───────────────┬──────────────┬────────────┘
-    ▼               ▼              ▼
-┌──────────┐  ┌──────────┐  ┌──────────────┐
-│ Edge Fn  │  │ MCP      │  │ Workflow     │
-│ webhook  │  │ server   │  │ routing      │
-│ (dyn vars│  │ (Edge Fn)│  │ (LLM / expr) │
-│ + KV)    │  └────┬─────┘  └──────────────┘
-└────┬─────┘       │
-     ▼             ▼
-┌──────────┐  ┌──────────────┐
-│   KV     │  │ FleetInventory│
-│ (cache)  │  │ Actor         │
-└──────────┘  │ (availability)│
-              └──────────────┘
+┌───────────────┐
+│ Caller (phone)│
+└───────┬───────┘
+        ▼
+┌───────────────────────────────────────────────────────────────────────┐
+│ Telnyx AI Assistant — Conversation Workflow (conversation_flow)        │
+│                                                                        │
+│  Greeting & Identify Intent (prompt, LLM edges)                        │
+│   ├─ booking_gate ──[expr: bookings_enabled == false]─ bookings_paused │
+│   │      └─(default)→ New Booking → Review → Check Availability        │
+│   │              → Get Quote → Present Quote → Deposit Disclosure      │
+│   │                (speak, verbatim) → Create Booking                  │
+│   ├─ Rental Disclosure (speak) → Documents & Requirements              │
+│   ├─ Existing Rental (lookup_booking)                                  │
+│   └─ Human Handoff (transfer, tool-scoped: no hangup)                  │
+│          └─[transfer failed + caller agrees]→ Take Message             │
+└──────┬─────────────────────────┬───────────────────────────────────────┘
+       │ dynamic vars webhook    │ MCP tools (streamable-http)
+       ▼                         ▼
+┌─────────────────────┐   ┌─────────────────────────────┐
+│ Edge Fn: webhook    │   │ Edge Fn: MCP server         │
+│ (dynamic-variables) │   │ (wadeea-mcp, 6 tools,       │
+│  Ed25519 verify     │   │  hand-rolled protocol)      │
+│ ┌─────┐ ┌─────────┐ │   │ ┌──────────────┐ ┌───────┐  │
+│ │ KV  │ │CallSess │ │   │ │FleetInventory│ │ SQLDB │  │
+│ │flag │ │ actor   │ │   │ │actor: atomic │ │records│  │
+│ └─────┘ └─────────┘ │   │ │reserve/rebook│ │pricing│  │
+└─────────────────────┘   │ └──────────────┘ └───────┘  │
+                          └─────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────┐
+│ Edge Fn: observe — public dashboard (logs / metrics /      │
+│ per-call node traces = "your evidence"); reads the Telnyx  │
+│ logs REST API, MCP /stats, and the conversations API       │
+└────────────────────────────────────────────────────────────┘
 ```
 
-- **AI Assistant (Telnyx)** — conversation driver: instructions, greeting, a `conversation_flow` workflow (prompt/speak/tool nodes + LLM/variable/default edges), attached MCP server, dynamic-variables webhook, Handoff/Transfer. Callable via phone number.
-- **Conversation Workflow** — Telnyx `conversation_flow` graph. Speak node for the greeting + Dubai rental disclosure (verbatim); prompt nodes for intent detection, slot collection, review.
-- **Custom MCP server** (Edge function) — tools: `check_availability`, `get_quote`, `create_booking`. Telnyx injects `telnyx_conversation_id` per call.
-- **Dynamic-variables webhook** (Edge function) — returns per-caller context at call start; values feed variable-comparison routing edges.
-- **KV** — sessions, pricing, rental rules, feature flags, indexes (not vehicle availability).
-- **FleetInventory Actor** — atomic read-modify-write; owns authoritative availability and reservation, prevents double-booking.
-- **Deploy** — `telnyx-edge ship`.
+- **AI Assistant (Telnyx)** — conversation driver: instructions, greeting, `conversation_flow` (prompt/speak nodes + LLM/expression/default edges), attached MCP server, dynamic-variables webhook, Transfer/hangup tools (scoped per node). Callable via phone number.
+- **Conversation Workflow** — LLM edges decide *intent*; the expression edge on `booking_gate` decides *system state* (`bookings_enabled` from KV); speak nodes deliver verbatim wording (greeting disclosure, deposit hold notice, paused message).
+- **Custom MCP server** (Edge function) — 6 tools: `check_availability`, `get_quote`, `create_booking` (UAE-phone enforcement + normalization), `get_document_requirements`, `get_rental_rules`, `lookup_booking`. Telnyx injects `telnyx_conversation_id` per call; every tool call is logged (args/result whitelists, no PII) and counted on `GET /stats`.
+- **Dynamic-variables webhook** (Edge function) — Ed25519-verified; returns 12 per-caller variables (`call_count`, `returning_caller`, `caller_number`, `is_uae_caller`, `bookings_enabled`, …) that personalize the greeting and drive expression-edge routing. Per-hop timings (`kv_ms`, `session_ms`) logged each call.
+- **KV** — the `flag/bookings_enabled` kill switch: one CLI write flips the booking path with no redeploy.
+- **Actors** — `FleetInventory` (per category): atomic check-and-reserve, prevents double-booking; `CallSession` (per caller): returning-caller memory.
+- **Observability** (Edge function) — the dashboard is itself deployed on Telnyx Edge; live metrics, alerts with runbook hints, log stream, and per-call node-execution traces.
+- **Deploy** — `telnyx-edge ship`; every function runs as autoscaled instances behind the platform's load balancer.
 
 See [docs/adr/0001-architecture.md](docs/adr/0001-architecture.md) for decisions and open Telnyx questions.
 
@@ -69,7 +80,7 @@ template uses) rather than a dedicated end node.
 
 ## How to interact
 
-- **Phone:** `+1 ...` ← fill in the assistant's number (dial to start the workflow)
+- **Phone:** **+1 (737) 335-1093** — dial to talk to Wadeea (starts the workflow)
 - **Dynamic-variables webhook:** https://wadeea-dynamic-variables-v3-923bbb9e-9.telnyxcompute.com
 - **MCP server:** https://wadeea-mcp-c722fc30-3.telnyxcompute.com/mcp (publicly reachable; `/health` for liveness)
 
@@ -146,7 +157,7 @@ churn (new boots, SIGTERM drains during revision swaps) is visible in the same s
 - **Assistant is generic (no personalization / no returning-caller greeting):** the dynamic-variables webhook failed or timed out. → Portal **per-conversation webhook logs** (request/response + timing), then `telnyx-edge logs wadeea-dynamic-variables-v3`. First signal: non-200 in the portal webhook log, or `outcome:"signature_invalid"` in ours — exactly how we caught the missing `TELNYX_PUBLIC_KEY` secret after cutover.
 - **Assistant fabricates availability/price:** a tool returned structured "unavailable" and the model spoke a price anyway. → **Conversation History** transcript (shows node + tool call/result inline). First signal: tool result says unavailable, assistant says a number.
 - **Bookings fail / loop:** `create_booking` erring. → `telnyx-edge logs wadeea-mcp --type invocations` (non-200s / durations), then replay the exact tool call with `curl` against `/mcp`. First signal: `booking_failed` in the tool result — historically this meant the **actor-runtime snapshot bucket is full** (`TooManyObjects`): check object count, run `scripts/janitor.py`.
-- **Everything MCP is down:** `/health` on the function answers instantly and touches no dependency, so it separates "function down" (repoint assistant to the fallback engine) from "dependency down" (bucket/SQLDB — janitor first).
+- **Everything MCP is down:** `/health` on the function answers instantly and touches no dependency, so it separates "function down" from "dependency down" (bucket/SQLDB — janitor first).
 
 ### One thing that broke and how we found it (demo-day)
 
@@ -170,7 +181,6 @@ fallback: [ADR 0002](docs/adr/0002-actor-outage-postgres-fallback.md).
 |---|---|---|
 | MCP server (canonical) | https://wadeea-mcp-c722fc30-3.telnyxcompute.com/mcp | live — assistant attached; 6 tools; FleetInventory actor bookings |
 | Dynamic-variables webhook | https://wadeea-dynamic-variables-v3-923bbb9e-9.telnyxcompute.com | live — Ed25519 verified; CallSession actor; KV flag |
-| Fallback MCP engine | https://wadeea-mcp-server-v3-99a58ff6-c.telnyxcompute.com/mcp | deployed, dormant (failover: repoint the assistant's MCP URL) |
 | Observability dashboard | https://wadeea-observe-23449883-5.telnyxcompute.com/?key=… | live — the dashboard is itself an Edge Function (key in `.env` as `DASH_KEY`) |
 | SQLDB | `wadeea-db-2` (d6b65834-…) | seeded; booking records live |
 | Actors | `FleetInventory` (per category), `CallSession` (per caller) | both live, verified on real calls |
@@ -195,5 +205,4 @@ era), ADR 0001 (original design).
 ## Working in this repo
 
 Read [AGENTS.md](AGENTS.md) first. Product scope, boundaries, conventions, testing,
-observability, and agent instructions live there. Requirements source of truth:
-[assignment.md](assignment.md) (do not modify).
+observability, and agent instructions live there.

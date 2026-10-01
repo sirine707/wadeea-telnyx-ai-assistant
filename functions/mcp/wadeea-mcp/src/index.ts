@@ -1,14 +1,14 @@
 import { env } from "@telnyx/edge-runtime";
-import * as tools from "./mcp_tools";
-import { handleMcpRequest, toSse, type McpToolDef } from "./mcp_protocol";
-import { SqldbClient, type SqlDatabaseLike } from "./sqldb_client";
-import { CachedSqlClient } from "./cached_sql_client";
-import { StatsRecorder, getToolCallInfo } from "./stats";
-import { summarizeToolIO } from "./tool_io";
-import type { ActorClient, SqlClient, ReserveResult, AvailabilityResult } from "./types";
+import * as tools from "./mcp/mcp_tools";
+import { handleMcpRequest, toSse, type McpToolDef } from "./mcp/mcp_protocol";
+import { SqldbClient, type SqlDatabaseLike } from "./storage/sqldb_client";
+import { CachedSqlClient } from "./storage/cached_sql_client";
+import { StatsRecorder, getToolCallInfo } from "./observability/stats";
+import { summarizeToolIO } from "./mcp/tool_io";
+import type { ActorClient, SqlClient, ReserveResult, AvailabilityResult } from "./shared/types";
 
 // Actor class ships with this bundle; the runtime registers the type.
-export { FleetInventory } from "./fleet_inventory";
+export { FleetInventory } from "./actors/fleet_inventory";
 
 // ── Everything below is constructed lazily: module scope must stay inert
 //    because the actor container loads this same bundle (ADR 0002). ──

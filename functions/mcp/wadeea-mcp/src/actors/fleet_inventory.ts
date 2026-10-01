@@ -1,6 +1,6 @@
 import { StatefulActor } from "@telnyx/edge-runtime";
 import { applyReserve, applyRelease, countAvailable, type StoredReservation } from "./reservation_logic";
-import type { ReserveResult, AvailabilityResult } from "./types";
+import type { ReserveResult, AvailabilityResult } from "../shared/types";
 
 // One actor instance per vehicle category (idFromName(category_id)) — the
 // assignment's 4c shape: no constructor, lazy get/put, single-threaded RMW.

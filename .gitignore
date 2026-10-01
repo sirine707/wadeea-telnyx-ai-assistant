@@ -18,3 +18,8 @@ node_modules/
 dist/
 build/
 .DS_Store
+before_submission.md
+
+.opencode/
+.telnyx/
+assignment.md

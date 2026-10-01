@@ -47,13 +47,12 @@ speaks to caller → edges route to the next node.
 ## Repository layout
 
 ```
-/functions/wadeea-dynamic-variables-v3/  webhook box (LIVE): Ed25519 via node:crypto, KV flag, CallSession actor
-/functions/mcp/wadeea-mcp/               MCP box (LIVE): 6 tools, FleetInventory actor, SQLDB binding, hand-rolled MCP
-/functions/mcp/wadeea-mcp-server-v3/     deployed Postgres/Neon fallback engine (failover only)
+/functions/wadeea-dynamic-variables-v3/  webhook box (LIVE): src/{actors,shared}: Ed25519, UAE phone, KV flag, CallSession actor
+/functions/mcp/wadeea-mcp/               MCP box (LIVE): src/{actors,mcp,storage,shared,observability}: 6 tools, FleetInventory actor, SQLDB
 /functions/wadeea-observe/               observability dashboard as an Edge Function (LIVE): Telnyx logs REST API + MCP /stats, key-gated
 /lib/                                    shared tested modules (protocol, clients, pure actor logic, fakes)
 /test/                                   Vitest suites (root) — function-local suites live beside their function
-/sql/                                    schema+seed: sqldb_schema_seed.sql (SQLite/SQLDB) and schema.sql+seed.sql (Neon fallback)
+/sql/                                    sqldb_schema_seed.sql — schema + seed for Telnyx SQLDB (wadeea-db-2)
 /docs/adr/                               architecture decision records (0001–0003)
 opencode.jsonc                           OpenCode config with @telnyx/opencode plugin active
 ```
@@ -65,7 +64,7 @@ Each Edge Function has its own `func.toml` (classic manifest with `[edge_compute
 
 ## Conventions
 
-- Language: TypeScript, `strict`. Runtime: Telnyx Edge Compute (`@telnyx/edge-runtime`). Shared SQL via the Telnyx SQLDB binding (`[storage.sqldb]`, zero client deps); the deployed fallback engine still uses Neon (`DATABASE_URL`). No externally-managed servers beyond Edge functions.
+- Language: TypeScript, `strict`. Runtime: Telnyx Edge Compute (`@telnyx/edge-runtime`). Shared SQL via the Telnyx SQLDB binding (`[storage.sqldb]`, zero client deps). No externally-managed servers beyond Edge functions.
 - MCP: hand-rolled streamable-http subset (`lib/mcp_protocol.ts`, ADR 0003) — no SDK, to keep bundles single-dependency for actor hosts. Tool names are snake_case; one tool = one business action.
 - Workflow nodes: name them descriptively (names appear in transcripts). Prefer `append` mode to keep base safety/brand rules; use `replace` only for tightly-scoped steps. Scope tools per node — leave enabled only what that step needs.
 - Speak nodes for anything that must be delivered verbatim (greetings, the Dubai rental disclosure, compliance statements). Never use a prompt node where exact wording is required.
@@ -101,7 +100,7 @@ Each Edge Function has its own `func.toml` (classic manifest with `[edge_compute
 ## Agent instructions (for AI agents editing this repo)
 
 - Do not implement application code unless asked.
-- `assignment.md` is the source of truth for requirements; do not modify it. Align these docs to it.
+- `assignment.md` (local, untracked) is the source of truth for requirements; do not modify it. Align these docs to it.
 - Keep AGENTS.md, README.md, and docs/adr/ in sync with any architecture change. New decision → new ADR; update README status.
 - Never invent Telnyx behavior. Cite the doc URL or mark it an open question in docs/adr/0001-architecture.md.
 - Never invent product data. Tools own all data; the assistant only relays tool results.
@@ -110,7 +109,7 @@ Each Edge Function has its own `func.toml` (classic manifest with `[edge_compute
 
 ## Current status
 
-- **LIVE (2026-09-29):** canonical two-box architecture (ADR 0003) — `wadeea-mcp` (6 tools, FleetInventory actor, SQLDB) and `wadeea-dynamic-variables-v3` (Ed25519, KV flag, CallSession actor), both verified on real phone calls; 5 production reservations migrated into the actor and count-verified; `wadeea-mcp-server-v3` retained as deployed failover.
+- **LIVE (2026-09-29):** canonical two-box architecture (ADR 0003) — `wadeea-mcp` (6 tools, FleetInventory actor, SQLDB) and `wadeea-dynamic-variables-v3` (Ed25519, KV flag, CallSession actor), both verified on real phone calls; 5 production reservations migrated into the actor and count-verified.
 - **Instrumentation ship (2026-09-29, verified):** `wadeea-mcp` re-shipped with `GET /stats` + per-tool-call structured logging; actor survived the redeploy (`check_availability` returned real data post-ship). Observability dashboard added under `/observability`.
 - Remaining: portal polish (farewell speak node → end_call, Existing Rental branch), README demo package, git commit.
 
@@ -135,8 +134,7 @@ Each Edge Function has its own `func.toml` (classic manifest with `[edge_compute
 | Booking/rental records | Telnyx SQLDB `wadeea-db-2` | shared lookup | never used for availability |
 | Caller sessions (`call_count`, `last_intent`) | CallSession actor (per caller) | webhook-owned | feeds dynamic variables |
 | Feature flag `flag/bookings_enabled` | KV `wadeea-config` | toggle | read by the webhook per call |
-| Fallback engine data | Neon Postgres (`DATABASE_URL`) | dormant | only if the assistant is repointed to `wadeea-mcp-server-v3` |
 
-**Never calculate availability from booking records.** Availability comes from the FleetInventory actor (or, in failover, the fallback engine's `sql_reservations`).
+**Never calculate availability from booking records.** Availability comes from the FleetInventory actor.
 
 **Ops invariant (ADR 0003):** the account snapshot bucket holds ~5 objects and is never GC'd by the platform — run the janitor (prune superseded `gen-*` objects) during any write activity, or SQLDB writes and actor activations fail with `TooManyObjects`.

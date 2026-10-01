@@ -109,7 +109,7 @@ setInterval(function () {
 
 var FUNC_TITLES = { webhook: "Dynamic-variables webhook", mcp: "MCP server (6 tools + FleetInventory actor)" };
 var EXTRA_KEYS = ["latency_ms", "call_count", "session_outcome", "session_ms", "kv_ms", "bookings_enabled",
-  "returning_caller", "node", "tool", "reserve", "actor_ms", "sqldb_ms", "total_ms", "booking_id"];
+  "returning_caller", "is_uae_caller", "node", "tool", "reserve", "actor_ms", "sqldb_ms", "total_ms", "booking_id"];
 var flat = function (obj, name) { // one-level object -> "name(k=v ...)"
   if (!obj || typeof obj !== "object") return "";
   var keys = Object.keys(obj);
@@ -155,7 +155,8 @@ function renderAlerts(alerts) {
   }).join("");
 }
 
-function renderTraces(convs) {
+function renderTraces(convs, flows) {
+  flows = flows || {};
   $("traces").innerHTML = convs.slice(0, 12).map(function (c) {
     var steps = c.steps.map(function (s) {
       var d = s.detail || {};
@@ -164,14 +165,17 @@ function renderTraces(convs) {
         ' <span class="fn-' + esc(s.func) + '">[' + esc(s.func) + "]</span> " + esc(s.event) + " " + bits + "</div>";
     }).join("");
     var openAttr = traceOpen[c.conversationId] === false ? "" : " open";
+    var flow = flows[c.conversationId]
+      ? '<div class="step" style="color: var(--blue)">' + esc(flows[c.conversationId]) + "</div>"
+      : "";
     return '<details data-conv="' + esc(c.conversationId) + '"' + openAttr + "><summary><span class=\\"badge\\">" + esc(c.conversationId.slice(0, 8)) + "</span> " +
-      time(c.firstTs) + " · " + c.steps.length + " step(s)</summary>" + steps + "</details>";
+      time(c.firstTs) + " · " + c.steps.length + " step(s)</summary>" + flow + steps + "</details>";
   }).join("") || '<span class="dim">no calls yet — dial the assistant</span>';
 }
 
 function rowHtml(ev, prevTs) {
   var fn = '<span class="fn-' + esc(ev.func) + '">[' + esc(ev.func) + "]</span>";
-  var cls, st, outcome, conv, extras;
+  var cls, st, outcome, conv;
   if (ev.kind === "invocation") {
     cls = ev.status < 400 ? "ok" : "bad";
     return '<div class="row">' + tsHtml(ev.ts, prevTs) +
@@ -227,7 +231,7 @@ async function poll() {
     var s = await res.json();
     renderCards(s.funcs);
     renderAlerts(s.alerts);
-    renderTraces(s.conversations);
+    renderTraces(s.conversations, s.flows);
     renderStream(s.recent);
     if (s.stats) renderStats(s.stats);
     $("conn").classList.add("live");

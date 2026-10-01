@@ -1,10 +1,11 @@
 import { env } from "@telnyx/edge-runtime";
-import { verifyTelnyxSignature } from "./verify";
-import { log } from "./logging";
-import type { RecordCallResult } from "./session_logic";
+import { verifyTelnyxSignature } from "./shared/verify";
+import { isUaeNumber } from "./shared/phone";
+import { log } from "./shared/logging";
+import type { RecordCallResult } from "./actors/session_logic";
 
 // Re-export the actor class so the runtime registers the [[actors]] type.
-export { CallSession } from "./call_session";
+export { CallSession } from "./actors/call_session";
 
 const ASSISTANT_INITIALIZATION = "assistant.initialization";
 const NODE = "dynamic-variables";
@@ -28,8 +29,9 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 
 async function readBookingsFlag(): Promise<boolean> {
   try {
-    const kv = (env as unknown as { WADEEA_CONFIG?: { getText(k: string): Promise<string | null> } }).WADEEA_CONFIG;
-    const val = await kv?.getText(BOOKINGS_ENABLED_KEY);
+    // KvNamespace binding API: get(key) -> string | null (kv-namespace.d.ts)
+    const kv = (env as unknown as { WADEEA_CONFIG?: { get(k: string): Promise<string | null> } }).WADEEA_CONFIG;
+    const val = await kv?.get(BOOKINGS_ENABLED_KEY);
     return val === null || val === undefined ? true : val === "true";
   } catch {
     return true;
@@ -94,6 +96,9 @@ export default {
     const bookings_enabled = await readBookingsFlag();
     const kv_ms = Date.now() - kvStart;
 
+    // String "true"/"false" so workflow expression edges compare reliably.
+    const is_uae_caller = isUaeNumber(caller) ? "true" : "false";
+
     const dynamic_variables = {
       session_id: conversationId ?? "",
       customer_name: "Demo Caller",
@@ -101,10 +106,15 @@ export default {
       rental_found: false,
       verified,
       rental_status: "none",
+      // Boolean: the portal encodes expression edges on this as bool_literal.
       bookings_enabled,
       call_count: session.call_count,
       returning_caller: session.returning_caller,
       last_intent: session.last_intent ?? "",
+      is_uae_caller,
+      // For "shall I register the number you're calling from?" — dynamic
+      // variable only, deliberately never logged (no PII in logs).
+      caller_number: is_uae_caller === "true" ? caller : "",
     };
 
     log({
@@ -119,6 +129,7 @@ export default {
       kv_ms,
       bookings_enabled,
       returning_caller: session.returning_caller,
+      is_uae_caller,
     });
 
     return Response.json({ dynamic_variables });

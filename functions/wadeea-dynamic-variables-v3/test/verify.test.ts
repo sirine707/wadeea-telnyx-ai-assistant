@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { generateKeyPairSync, sign as edSign } from "node:crypto";
-import { verifyTelnyxSignature } from "../src/verify";
+import { verifyTelnyxSignature } from "../src/shared/verify";
 
 // Telnyx signs `${timestamp}|${rawBody}` with Ed25519; signature and public
 // key travel base64-encoded (key as 32 raw bytes).

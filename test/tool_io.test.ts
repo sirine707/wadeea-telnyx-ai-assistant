@@ -55,4 +55,9 @@ describe("summarizeToolIO (whitelisted tool args/result for the tool_call log li
     expect(summarizeToolIO(null, null)).toEqual({});
     expect(summarizeToolIO("weird", "")).toEqual({});
   });
+
+  it("summarizes an array result (documents, rules) as a count", () => {
+    const io = summarizeToolIO({}, JSON.stringify([{ id: "d1" }, { id: "d2" }, { id: "d3" }]));
+    expect(io.result).toEqual({ count: 3 });
+  });
 });

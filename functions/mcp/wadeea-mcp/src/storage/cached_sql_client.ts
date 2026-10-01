@@ -5,7 +5,7 @@ import type {
   BookingRecord,
   RentalRule,
   DocumentRequirement,
-} from "./types";
+} from "../shared/types";
 
 interface CacheEntry {
   value: unknown;

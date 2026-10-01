@@ -16,6 +16,11 @@ export function summarizeToolIO(args: unknown, resultText: string | null): { arg
   if (resultText && resultText.length > 0) {
     try {
       const parsed = JSON.parse(resultText) as Record<string, unknown>;
+      if (Array.isArray(parsed)) {
+        // List results (documents, rules): the useful summary is how many.
+        out.result = { count: parsed.length };
+        return out;
+      }
       const filtered: Record<string, unknown> = {};
       for (const k of RESULT_KEYS) {
         if (k in parsed) filtered[k] = parsed[k];

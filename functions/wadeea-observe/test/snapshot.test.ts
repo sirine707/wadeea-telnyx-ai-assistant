@@ -99,4 +99,36 @@ describe("buildSnapshot (assembles the dashboard payload from the Telnyx REST AP
     expect(snap.stats).toBeNull();
     expect(snap.alerts).toEqual([]);
   });
+
+  it("paginates past monitor-noise pages (has_more) so real traffic is counted", async () => {
+    const noisePage = {
+      meta: { has_more: true },
+      data: Array.from({ length: 3 }, (_, i) => ({
+        record_type: "compute_func_invocation_log",
+        timestamp: `2026-09-30T10:00:0${i}.000Z`,
+        method: "GET", path: "/stats", status_code: 200, duration_ms: 2,
+        request_size_bytes: 0, response_size_bytes: 10, region: "r",
+      })),
+    };
+    const realPage = {
+      meta: { has_more: false },
+      data: [{
+        record_type: "compute_func_invocation_log",
+        timestamp: "2026-09-30T10:05:00.000Z",
+        method: "POST", path: "/mcp", status_code: 200, duration_ms: 3,
+        request_size_bytes: 5, response_size_bytes: 9, region: "r",
+      }],
+    };
+    let invocationCalls = 0;
+    const pagedFetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/stats")) return new Response(JSON.stringify({ instance_id: "i", tool_calls: {} }));
+      if (url.includes("type=runtime")) return new Response(JSON.stringify({ meta: { has_more: false }, data: [] }));
+      invocationCalls++;
+      return new Response(JSON.stringify(invocationCalls <= 2 ? noisePage : realPage));
+    }) as typeof fetch;
+    const snap = await buildSnapshot({ ...OPTS, fetchImpl: pagedFetch });
+    expect(snap.funcs["mcp"].requests + (snap.funcs["webhook"]?.requests ?? 0)).toBeGreaterThan(0);
+    expect(snap.recent.some((e) => e.kind === "invocation" && e.path === "/mcp")).toBe(true);
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyRecordCall, type CallSessionState } from "../src/session_logic";
+import { applyRecordCall, type CallSessionState } from "../src/actors/session_logic";
 
 describe("CallSession logic (mentor's 4c example shape)", () => {
   it("first call: count becomes 1, not a returning caller", () => {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { addDays } from "./date_utils";
+import { addDays } from "../shared/date_utils";
+import { normalizeUae } from "../shared/phone";
 import type {
   ActorClient,
   SqlClient,
@@ -14,7 +15,7 @@ import type {
   RentalRule,
   LookupBookingArgs,
   LookupBookingResult,
-} from "./types";
+} from "../shared/types";
 
 export interface ToolDeps {
   actor: ActorClient;
@@ -82,6 +83,15 @@ export async function createBooking(
   args: CreateBookingArgs,
   deps: ToolDeps,
 ): Promise<CreateBookingResult> {
+  const t0 = Date.now();
+
+  // Bookings require a UAE contact number — enforced and normalized here,
+  // deterministically, so the model never has to know phone formats.
+  const customerPhone = args.customer_phone ? normalizeUae(args.customer_phone) : null;
+  if (!customerPhone) {
+    return { ok: false, reason: "invalid_phone" };
+  }
+
   const categoryId = normalizeCategoryId(args.category_id);
   const category = await deps.sql.getCategory(categoryId);
   if (!category) return { ok: false, reason: "category not found" };
@@ -93,6 +103,7 @@ export async function createBooking(
   const end_date = addDays(args.start_date, args.duration_days);
   const total_cents = pricing.daily_rate_cents * args.duration_days;
 
+  const reserveStart = Date.now();
   const reserveResult = await deps.actor.reserve(
     categoryId,
     booking_id,
@@ -100,16 +111,21 @@ export async function createBooking(
     end_date,
     category.total_units,
   );
+  const actor_ms = Date.now() - reserveStart;
 
   if (!reserveResult.ok) {
+    const total_ms = Date.now() - t0;
+    console.log(JSON.stringify({ event: "booking_pipeline", booking_id, category_id: categoryId, reserve: "unavailable", actor_ms, sqldb_ms: 0, total_ms, outcome: "unavailable" }));
     return { ok: false, reason: "unavailable" };
   }
 
+  let sqldb_ms = 0;
   try {
+    const sqlStart = Date.now();
     const insertResult = await deps.sql.insertBooking({
       booking_id,
       customer_name: args.customer_name,
-      customer_phone: args.customer_phone,
+      customer_phone: customerPhone,
       category_id: categoryId,
       start_date: args.start_date,
       end_date,
@@ -117,11 +133,14 @@ export async function createBooking(
       daily_rate_cents: pricing.daily_rate_cents,
       total_cents,
       currency: pricing.currency,
-      delivery_area: args.delivery_area,
+      delivery_area: args.delivery_area ?? null,
       status: "confirmed",
       created_at: new Date().toISOString(),
     });
+    sqldb_ms = Date.now() - sqlStart;
 
+    const total_ms = Date.now() - t0;
+    console.log(JSON.stringify({ event: "booking_pipeline", booking_id, category_id: categoryId, reserve: "ok", actor_ms, sqldb_ms, total_ms, outcome: "ok" }));
     return {
       ok: true,
       booking_id,
@@ -131,6 +150,8 @@ export async function createBooking(
     };
   } catch {
     await deps.actor.release(categoryId, booking_id);
+    const total_ms = Date.now() - t0;
+    console.log(JSON.stringify({ event: "booking_pipeline", booking_id, category_id: categoryId, reserve: "ok", actor_ms, sqldb_ms, total_ms, outcome: "booking_failed" }));
     return { ok: false, reason: "booking_failed" };
   }
 }

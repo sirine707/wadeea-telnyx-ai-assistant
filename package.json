@@ -5,13 +5,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "observe": "tsx observability/src/serve_dashboard.ts",
-    "dev": "tsx functions/dynamic-variables/index.ts"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.1",
-    "@neondatabase/serverless": "^1.1.0",
-    "telnyx": "^2.0.0"
+    "observe": "tsx observability/src/serve_dashboard.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
